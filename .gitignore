@@ -17,7 +17,6 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
-proompts/
 .chainlit/
 
 # Go workspace file
@@ -35,3 +34,4 @@ go.work.sum
 
 # Test reports
 examples/distributed/social-media/tests/reports/
+.beads/.cache/
