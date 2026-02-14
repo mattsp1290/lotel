@@ -1,6 +1,6 @@
 # lotel — Local OpenTelemetry
 
-A CLI tool for local OpenTelemetry telemetry collection, querying, and management. Runs the OTel Collector as a local subprocess and stores telemetry in DuckDB for fast querying.
+A CLI tool for local OpenTelemetry telemetry collection, querying, and management. Runs the OTel Collector as a Docker container and stores telemetry in DuckDB for fast querying.
 
 ## Scope
 
@@ -9,8 +9,8 @@ A CLI tool for local OpenTelemetry telemetry collection, querying, and managemen
 ## Quick Start
 
 ```bash
-# Install the collector binary
-# See: https://github.com/open-telemetry/opentelemetry-collector-releases
+# Ensure Docker is installed and running
+# See: https://docs.docker.com/get-docker/
 
 # Build lotel
 go build -o lotel ./cmd/lotel
@@ -30,7 +30,7 @@ go build -o lotel ./cmd/lotel
 
 | Command | Description |
 |---------|-------------|
-| `lotel start [--wait]` | Start the OTel Collector subprocess |
+| `lotel start [--wait]` | Start the OTel Collector container |
 | `lotel stop` | Stop the collector |
 | `lotel status` | Show collector status (JSON) |
 | `lotel health` | Check collector health (exit 0/1) |
@@ -87,7 +87,7 @@ This makes lotel suitable for scripted and agent-driven workflows.
 
 ```
 Application → OTLP (gRPC :4317 / HTTP :4318)
-    → OTel Collector (subprocess)
+    → OTel Collector (Docker container)
         → ~/.lotel/data/{traces,metrics,logs}/*.jsonl
             → lotel ingest → DuckDB (~/.lotel/data/lotel.db)
                 → lotel query → JSON output
@@ -97,7 +97,7 @@ Application → OTLP (gRPC :4317 / HTTP :4318)
 
 - **Raw**: JSONL files written by the collector to `~/.lotel/data/{traces,metrics,logs}/`
 - **Indexed**: DuckDB database at `~/.lotel/data/lotel.db` (populated by `lotel ingest`)
-- **State**: Collector PID and config at `~/.lotel/collector.state`
+- **State**: Container ID and config at `~/.lotel/collector.state`
 - **Config**: Default config at `~/.lotel/collector-config.yaml` (auto-generated)
 
 ## Configuration
@@ -119,42 +119,8 @@ python3 scripts/verify.py
 ## Requirements
 
 - Go 1.24+
-- `otelcol-contrib` binary on PATH
+- Docker
 - CGO enabled (for DuckDB)
-
-### Installing otelcol-contrib
-
-Download the latest release from [opentelemetry-collector-releases](https://github.com/open-telemetry/opentelemetry-collector-releases/releases) for your platform, extract, and place on PATH.
-
-**Linux x86_64:**
-
-```bash
-curl -LO https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.143.1/otelcol-contrib_0.143.1_linux_amd64.tar.gz
-tar xzf otelcol-contrib_0.143.1_linux_amd64.tar.gz
-sudo mv otelcol-contrib /usr/local/bin/
-```
-
-**Linux ARM64:**
-
-```bash
-curl -LO https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.143.1/otelcol-contrib_0.143.1_linux_arm64.tar.gz
-tar xzf otelcol-contrib_0.143.1_linux_arm64.tar.gz
-sudo mv otelcol-contrib /usr/local/bin/
-```
-
-**macOS ARM (Apple Silicon):**
-
-```bash
-curl -LO https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.143.1/otelcol-contrib_0.143.1_darwin_arm64.tar.gz
-tar xzf otelcol-contrib_0.143.1_darwin_arm64.tar.gz
-sudo mv otelcol-contrib /usr/local/bin/
-```
-
-Verify the installation:
-
-```bash
-otelcol-contrib --version
-```
 
 ## License
 
