@@ -250,7 +250,7 @@ func main() {
 				return err
 			}
 			if dryRun {
-				fmt.Println("Dry run — no data was deleted.")
+				fmt.Fprintln(os.Stderr, "Dry run — no data was deleted.")
 			}
 			printJSON(reports)
 			return nil

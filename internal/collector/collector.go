@@ -304,7 +304,7 @@ func resolveConfig(configPath, dataPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolvedPath := filepath.Join(home, stateDir, "collector-config.yaml")
+	resolvedPath := filepath.Join(home, stateDir, "collector-config.resolved.yaml")
 	if err := os.WriteFile(resolvedPath, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("writing resolved config: %w", err)
 	}

@@ -109,6 +109,40 @@ python3 scripts/verify.py
 - `otelcol-contrib` binary on PATH
 - CGO enabled (for DuckDB)
 
+### Installing otelcol-contrib
+
+Download the latest release from [opentelemetry-collector-releases](https://github.com/open-telemetry/opentelemetry-collector-releases/releases) for your platform, extract, and place on PATH.
+
+**Linux x86_64:**
+
+```bash
+curl -LO https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.143.1/otelcol-contrib_0.143.1_linux_amd64.tar.gz
+tar xzf otelcol-contrib_0.143.1_linux_amd64.tar.gz
+sudo mv otelcol-contrib /usr/local/bin/
+```
+
+**Linux ARM64:**
+
+```bash
+curl -LO https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.143.1/otelcol-contrib_0.143.1_linux_arm64.tar.gz
+tar xzf otelcol-contrib_0.143.1_linux_arm64.tar.gz
+sudo mv otelcol-contrib /usr/local/bin/
+```
+
+**macOS ARM (Apple Silicon):**
+
+```bash
+curl -LO https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.143.1/otelcol-contrib_0.143.1_darwin_arm64.tar.gz
+tar xzf otelcol-contrib_0.143.1_darwin_arm64.tar.gz
+sudo mv otelcol-contrib /usr/local/bin/
+```
+
+Verify the installation:
+
+```bash
+otelcol-contrib --version
+```
+
 ## License
 
 MIT

@@ -231,30 +231,50 @@ def verify_pruned():
         raise RuntimeError(f"Expected 0 traces after prune, got {len(data)}")
 
 
+def start_collector():
+    """Start the collector and wait for it to become healthy."""
+    result = run(["start", "--wait"], check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to start collector: {result.stderr.strip()}")
+
+
+def stop_collector():
+    """Stop the collector."""
+    result = run(["stop"], check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to stop collector: {result.stderr.strip()}")
+
+
 def main():
     print(f"lotel end-to-end verification")
     print(f"Service tag: {SERVICE_NAME}")
     print()
 
-    print("[1/4] Collector health")
+    print("[0/5] Start collector")
+    test("Start collector", start_collector)
+
+    print("\n[1/5] Collector health")
     test("Collector is healthy", check_collector_health)
 
-    print("\n[2/4] OTLP ingestion")
+    print("\n[2/5] OTLP ingestion")
     test("Send OTLP traces", send_otlp_traces)
     test("Send OTLP metrics", send_otlp_metrics)
     test("Send OTLP logs", send_otlp_logs)
     test("Wait and ingest", wait_and_ingest)
 
-    print("\n[3/4] Query verification")
+    print("\n[3/5] Query verification")
     test("Query traces by service", query_traces)
     test("Query metrics by service", query_metrics)
     test("Query logs by service", query_logs)
     test("Metric aggregation", query_aggregate)
 
-    print("\n[4/4] Prune verification")
+    print("\n[4/5] Prune verification")
     test("Prune dry-run", prune_dry_run)
     test("Prune execute", prune_execute)
     test("Verify pruned", verify_pruned)
+
+    print("\n[5/5] Stop collector")
+    test("Stop collector", stop_collector)
 
     print(f"\nResults: {passed} passed, {failed} failed")
     sys.exit(0 if failed == 0 else 1)
