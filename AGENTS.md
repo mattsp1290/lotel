@@ -2,39 +2,40 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## Project Overview
+
+**lotel** is a CLI tool for local OpenTelemetry. It manages an OTel Collector subprocess and provides telemetry querying via DuckDB.
+
+## Key Paths
+
+- `cmd/lotel/main.go` — CLI entrypoint (Cobra commands)
+- `internal/collector/` — Subprocess lifecycle (start/stop/status/health)
+- `internal/config/` — Config resolution and defaults
+- `internal/storage/` — DuckDB schema, JSONL ingestion, query, prune
+- `scripts/verify.py` — End-to-end verification script
+
+## Quality Gates
+
+```bash
+go test ./...     # All tests must pass
+go build ./...    # Must compile
+```
+
 ## Quick Reference
 
 ```bash
 bd ready              # Find available work
 bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
 bd close <id>         # Complete work
-bd sync               # Sync with git
 ```
 
-## Landing the Plane (Session Completion)
+## Landing the Plane
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+When ending a session, you MUST:
 
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+1. Run quality gates (`go test ./... && go build ./...`)
+2. Update issue status with `bd close`
+3. Push to remote:
    ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
+   git pull --rebase && bd sync && git push
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-

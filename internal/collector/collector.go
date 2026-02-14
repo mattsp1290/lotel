@@ -296,7 +296,7 @@ func resolveConfig(configPath, dataPath string) (string, error) {
 	}
 
 	content := string(data)
-	// Replace /data references (Docker mount point) with actual data path.
+	// Replace /data/ prefix in paths with the actual data directory.
 	content = strings.ReplaceAll(content, "/data/", dataPath+"/")
 
 	// Write resolved config to state directory.

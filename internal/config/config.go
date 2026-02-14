@@ -85,11 +85,6 @@ func ResolvePaths() (configPath, dataPath string, err error) {
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, dataPath, nil
 		}
-		// Legacy path.
-		candidate = filepath.Join(cwd, "docker", "configs", "otel", "otel-collector-config-minimal.yaml")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, dataPath, nil
-		}
 	}
 
 	// Fall back to ~/.lotel/collector-config.yaml, creating it with defaults if absent.

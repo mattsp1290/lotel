@@ -1,2 +1,0 @@
-{"level":"info","test_id":"kafka_failure_1748960631","component":"result-streamer","component":"stream-manager","stream_id":"kafka-failure-stream","task_id":"task-kafka-failure","message":"Stream registered"}
-{"level":"info","test_id":"kafka_failure_1748960631","component":"result-streamer","component":"stream-manager","stream_id":"kafka-failure-stream","status":"active","stats":{"ChunksReceived":0,"BytesReceived":0,"TokensUsed":0,"Errors":0},"duration":0.117709,"message":"Stream removed"}

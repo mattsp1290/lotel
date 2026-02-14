@@ -1,1 +1,0 @@
-{"level":"INFO","message":"High throughput processing completed","timestamp":"2025-06-03T10:31:56.930449-04:00","fields":{"concurrent_streams":10,"test_id":"high_throughput_1748961116","total_chunks":200}}

@@ -1,1 +1,0 @@
-{"level":"ERROR","message":"Stream processing failed","timestamp":"2025-06-05T16:31:05.004361-04:00","fields":{"error":"mock stream failure after chunk 2","stream_id":"failing-stream-456","task_id":"task-failure-456","test_id":"stream_failure_1749155466"}}

@@ -1,2 +1,0 @@
-{"level":"WARN","message":"Buffer utilization high","timestamp":"2025-06-05T16:31:04.318934-04:00","fields":{"buffer_utilization":85.5,"memory_pressure":true,"test_id":"memory_pressure_1749155466"}}
-{"level":"INFO","message":"Memory pressure test completed","timestamp":"2025-06-05T16:31:06.318935-04:00","fields":{"test_id":"memory_pressure_1749155466","total_chunks":250}}

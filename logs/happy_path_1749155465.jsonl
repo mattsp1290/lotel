@@ -1,3 +1,0 @@
-{"level":"INFO","message":"Stream registered","timestamp":"2025-06-05T16:31:00.903609-04:00","fields":{"stream_id":"happy-stream-123","task_id":"task-happy-123","test_id":"happy_path_1749155465"}}
-{"level":"DEBUG","message":"Processing chunk content","timestamp":"2025-06-05T16:31:02.90361-04:00","fields":{"chunk_id":"chunk-1","stream_id":"happy-stream-123","test_id":"happy_path_1749155465"}}
-{"level":"INFO","message":"Stream removed","timestamp":"2025-06-05T16:31:04.90361-04:00","fields":{"stream_id":"happy-stream-123","task_id":"task-happy-123","test_id":"happy_path_1749155465"}}
