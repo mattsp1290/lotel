@@ -24,7 +24,7 @@ func main() {
 	var waitHealthy bool
 	startCmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start the OTel Collector subprocess",
+		Short: "Start the OTel Collector container",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, dataPath, err := config.ResolvePaths()
 			if err != nil {
@@ -49,7 +49,7 @@ func main() {
 	// --- stop ---
 	stopCmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the OTel Collector subprocess",
+		Short: "Stop the OTel Collector container",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return collector.Stop(cmd.Context())
 		},
@@ -228,18 +228,28 @@ func main() {
 	var olderThan string
 	var pruneService string
 	var dryRun bool
+	var pruneAll bool
 	pruneCmd := &cobra.Command{
 		Use:   "prune",
 		Short: "Delete telemetry data older than a threshold",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if olderThan == "" {
-				return fmt.Errorf("--older-than is required (e.g., '7d', '24h')")
+			if pruneAll && olderThan != "" {
+				return fmt.Errorf("--all and --older-than are mutually exclusive")
 			}
-			dur, err := parseDuration(olderThan)
-			if err != nil {
-				return fmt.Errorf("invalid --older-than: %w", err)
+			if !pruneAll && olderThan == "" {
+				return fmt.Errorf("--older-than or --all is required (e.g., '7d', '24h')")
 			}
-			cutoff := time.Now().Add(-dur)
+
+			var cutoff time.Time
+			if pruneAll {
+				cutoff = time.Now().Add(time.Hour) // future cutoff catches everything
+			} else {
+				dur, err := parseDuration(olderThan)
+				if err != nil {
+					return fmt.Errorf("invalid --older-than: %w", err)
+				}
+				cutoff = time.Now().Add(-dur)
+			}
 
 			db, err := storage.DB()
 			if err != nil {
@@ -259,6 +269,7 @@ func main() {
 	pruneCmd.Flags().StringVar(&olderThan, "older-than", "", "age threshold (e.g., '7d', '24h', '1h')")
 	pruneCmd.Flags().StringVar(&pruneService, "service", "", "limit pruning to a specific service")
 	pruneCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be pruned without deleting")
+	pruneCmd.Flags().BoolVar(&pruneAll, "all", false, "delete all telemetry data")
 
 	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, pruneCmd)
 

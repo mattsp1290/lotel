@@ -9,34 +9,37 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
-// State represents the persisted state of a running collector process.
+// State represents the persisted state of a running collector container.
 type State struct {
-	PID       int       `json:"pid"`
-	Binary    string    `json:"binary"`
-	StartedAt time.Time `json:"started_at"`
-	ConfigPath string   `json:"config_path"`
-	DataPath   string   `json:"data_path"`
+	ContainerID   string    `json:"container_id"`
+	ContainerName string    `json:"container_name"`
+	Image         string    `json:"image"`
+	StartedAt     time.Time `json:"started_at"`
+	ConfigPath    string    `json:"config_path"`
+	DataPath      string    `json:"data_path"`
 }
 
 // Status represents the current status of the collector.
 type Status struct {
-	Running   bool   `json:"running"`
-	PID       int    `json:"pid,omitempty"`
-	Healthy   bool   `json:"healthy"`
-	Uptime    string `json:"uptime,omitempty"`
-	Binary    string `json:"binary,omitempty"`
+	Running       bool   `json:"running"`
+	ContainerID   string `json:"container_id,omitempty"`
+	ContainerName string `json:"container_name,omitempty"`
+	Healthy       bool   `json:"healthy"`
+	Uptime        string `json:"uptime,omitempty"`
+	Image         string `json:"image,omitempty"`
 }
 
 const (
 	stateDir  = ".lotel"
 	stateFile = "collector.state"
 	healthURL = "http://localhost:13133/"
+
+	containerName = "lotel-collector"
+	defaultImage  = "otel/opentelemetry-collector-contrib:latest"
 )
 
 func stateFilePath() (string, error) {
@@ -98,57 +101,47 @@ func removeState() error {
 	return nil
 }
 
-// isProcessAlive checks if a process with the given PID is alive
-// and is actually an otelcol process.
-func isProcessAlive(s *State) bool {
-	if s == nil || s.PID == 0 {
-		return false
+// findDocker locates the docker binary.
+func findDocker() (string, error) {
+	path, err := exec.LookPath("docker")
+	if err != nil {
+		return "", fmt.Errorf("docker not found in PATH; install from https://docs.docker.com/get-docker/")
 	}
-	proc, err := os.FindProcess(s.PID)
+	return path, nil
+}
+
+// isContainerRunning checks if the lotel-collector container is running.
+func isContainerRunning() bool {
+	out, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", containerName).Output()
 	if err != nil {
 		return false
 	}
-	// Signal 0 checks process existence without sending a signal.
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		return false
-	}
-	// Verify it's actually our collector process by checking /proc/{pid}/cmdline.
-	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", s.PID))
-	if err != nil {
-		// On non-Linux or if /proc unavailable, fall back to trusting PID.
-		return true
-	}
-	return strings.Contains(string(cmdline), "otelcol")
+	return strings.TrimSpace(string(out)) == "true"
 }
 
-// findBinary locates the otelcol-contrib or otelcol binary.
-func findBinary() (string, error) {
-	for _, name := range []string{"otelcol-contrib", "otelcol"} {
-		path, err := exec.LookPath(name)
-		if err == nil {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("otelcol-contrib not found in PATH; install from https://github.com/open-telemetry/opentelemetry-collector-releases")
+// containerExists checks if the lotel-collector container exists (any state).
+func containerExists() bool {
+	err := exec.Command("docker", "inspect", containerName).Run()
+	return err == nil
 }
 
-// Start launches the collector as a background subprocess.
+// Start launches the collector as a Docker container.
 func Start(ctx context.Context, configPath, dataPath string) error {
 	// Check if already running.
-	state, err := readState()
-	if err != nil {
-		return err
-	}
-	if isProcessAlive(state) {
-		fmt.Printf("Collector is already running (PID %d).\n", state.PID)
+	if isContainerRunning() {
+		fmt.Printf("Collector is already running (container %s).\n", containerName)
 		return nil
 	}
-	// Clean up stale state if process is dead.
-	if state != nil {
-		_ = removeState()
+
+	// Clean up stale container if it exists but isn't running.
+	if containerExists() {
+		_ = exec.Command("docker", "rm", "-f", containerName).Run()
 	}
 
-	binary, err := findBinary()
+	// Also clean up stale state file.
+	_ = removeState()
+
+	dockerBin, err := findDocker()
 	if err != nil {
 		return err
 	}
@@ -160,93 +153,76 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 		}
 	}
 
-	// Build the collector config with resolved data paths.
-	resolvedConfig, err := resolveConfig(configPath, dataPath)
+	// Resolve to absolute paths for Docker bind mounts.
+	absConfig, err := filepath.Abs(configPath)
 	if err != nil {
-		return fmt.Errorf("resolving config: %w", err)
+		return fmt.Errorf("resolving config path: %w", err)
+	}
+	absData, err := filepath.Abs(dataPath)
+	if err != nil {
+		return fmt.Errorf("resolving data path: %w", err)
 	}
 
-	cmd := exec.Command(binary, "--config", resolvedConfig)
-	cmd.Stdout = nil // Collector logs to stderr by default.
-	cmd.Stderr = nil
-
-	// Detach from parent process group so the collector survives CLI exit.
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
+	// Run the container.
+	cmd := exec.Command(dockerBin, "run", "-d",
+		"--name", containerName,
+		"-p", "4317:4317",
+		"-p", "4318:4318",
+		"-p", "13133:13133",
+		"-v", absData+":/data",
+		"-v", absConfig+":/etc/otelcol-contrib/config.yaml:ro",
+		defaultImage,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("starting collector container: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting collector: %w", err)
-	}
+	containerID := strings.TrimSpace(string(out))
 
 	newState := &State{
-		PID:        cmd.Process.Pid,
-		Binary:     binary,
-		StartedAt:  time.Now(),
-		ConfigPath: resolvedConfig,
-		DataPath:   dataPath,
+		ContainerID:   containerID,
+		ContainerName: containerName,
+		Image:         defaultImage,
+		StartedAt:     time.Now(),
+		ConfigPath:    absConfig,
+		DataPath:      absData,
 	}
 	if err := writeState(newState); err != nil {
-		// Kill the process if we can't persist state.
-		_ = cmd.Process.Kill()
+		// Remove the container if we can't persist state.
+		_ = exec.Command("docker", "rm", "-f", containerName).Run()
 		return fmt.Errorf("persisting state: %w", err)
 	}
 
-	// Release the process so it's not tied to this CLI invocation.
-	_ = cmd.Process.Release()
-
-	fmt.Printf("Collector started (PID %d).\n", newState.PID)
-	fmt.Printf("Binary: %s\n", binary)
-	fmt.Printf("Config: %s\n", resolvedConfig)
-	fmt.Printf("Data:   %s\n", dataPath)
+	fmt.Printf("Collector started (container %s).\n", containerName)
+	fmt.Printf("Image:  %s\n", defaultImage)
+	fmt.Printf("Config: %s\n", absConfig)
+	fmt.Printf("Data:   %s\n", absData)
 	fmt.Println("Health: http://localhost:13133/")
 
 	return nil
 }
 
-// Stop terminates the running collector.
+// Stop terminates the running collector container.
 func Stop(ctx context.Context) error {
-	state, err := readState()
-	if err != nil {
-		return err
-	}
-	if state == nil || !isProcessAlive(state) {
+	if !isContainerRunning() && !containerExists() {
 		_ = removeState()
 		fmt.Println("No collector is running.")
 		return nil
 	}
 
-	proc, err := os.FindProcess(state.PID)
-	if err != nil {
+	fmt.Printf("Stopping collector (container %s)...\n", containerName)
+
+	if err := exec.Command("docker", "stop", containerName).Run(); err != nil {
+		// If stop fails, try force remove.
+		_ = exec.Command("docker", "rm", "-f", containerName).Run()
 		_ = removeState()
-		return fmt.Errorf("finding process %d: %w", state.PID, err)
+		return fmt.Errorf("stopping collector container: %w", err)
 	}
 
-	// Send SIGTERM for graceful shutdown.
-	fmt.Printf("Stopping collector (PID %d)...\n", state.PID)
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	if err := exec.Command("docker", "rm", containerName).Run(); err != nil {
 		_ = removeState()
-		return fmt.Errorf("sending SIGTERM: %w", err)
-	}
-
-	// Wait up to 10 seconds for graceful shutdown.
-	done := make(chan error, 1)
-	go func() {
-		// Poll for process exit.
-		for i := 0; i < 100; i++ {
-			if err := proc.Signal(syscall.Signal(0)); err != nil {
-				done <- nil
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		done <- fmt.Errorf("process did not exit within 10s")
-	}()
-
-	if err := <-done; err != nil {
-		// Force kill.
-		fmt.Println("Graceful shutdown timed out, sending SIGKILL...")
-		_ = proc.Signal(syscall.SIGKILL)
+		return fmt.Errorf("removing collector container: %w", err)
 	}
 
 	_ = removeState()
@@ -262,15 +238,20 @@ func GetStatus(ctx context.Context) (*Status, error) {
 	}
 
 	status := &Status{}
-	if state == nil || !isProcessAlive(state) {
+	if !isContainerRunning() {
 		_ = removeState()
 		return status, nil
 	}
 
 	status.Running = true
-	status.PID = state.PID
-	status.Binary = state.Binary
-	status.Uptime = time.Since(state.StartedAt).Truncate(time.Second).String()
+	if state != nil {
+		status.ContainerID = state.ContainerID
+		status.ContainerName = state.ContainerName
+		status.Image = state.Image
+		status.Uptime = time.Since(state.StartedAt).Truncate(time.Second).String()
+	} else {
+		status.ContainerName = containerName
+	}
 	status.Healthy = checkHealth()
 
 	return status, nil
@@ -285,30 +266,6 @@ func checkHealth() bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
-}
-
-// resolveConfig creates a runtime config file with resolved data paths.
-// It reads the source config and writes a copy with ${DATA_DIR} replaced.
-func resolveConfig(configPath, dataPath string) (string, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return "", fmt.Errorf("reading config %s: %w", configPath, err)
-	}
-
-	content := string(data)
-	// Replace /data/ prefix in paths with the actual data directory.
-	content = strings.ReplaceAll(content, "/data/", dataPath+"/")
-
-	// Write resolved config to state directory.
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	resolvedPath := filepath.Join(home, stateDir, "collector-config.resolved.yaml")
-	if err := os.WriteFile(resolvedPath, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("writing resolved config: %w", err)
-	}
-	return resolvedPath, nil
 }
 
 // WaitHealthy polls the health endpoint until healthy or timeout.
@@ -327,11 +284,11 @@ func WaitHealthy(ctx context.Context, timeout time.Duration) error {
 	return fmt.Errorf("collector did not become healthy within %s", timeout)
 }
 
-// Pid returns the running collector PID as a string, or empty if not running.
-func Pid() string {
+// ContainerID returns the running collector container ID, or empty if not running.
+func ContainerID() string {
 	state, _ := readState()
-	if state != nil && isProcessAlive(state) {
-		return strconv.Itoa(state.PID)
+	if state != nil && isContainerRunning() {
+		return state.ContainerID
 	}
 	return ""
 }

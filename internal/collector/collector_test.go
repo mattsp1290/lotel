@@ -1,9 +1,8 @@
 package collector
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStateRoundtrip(t *testing.T) {
@@ -22,8 +21,12 @@ func TestStateRoundtrip(t *testing.T) {
 
 	// Write state.
 	state := &State{
-		PID:    12345,
-		Binary: "/usr/bin/otelcol-contrib",
+		ContainerID:   "abc123def456",
+		ContainerName: "lotel-collector",
+		Image:         "otel/opentelemetry-collector-contrib:latest",
+		StartedAt:     time.Now(),
+		ConfigPath:    "/tmp/config.yaml",
+		DataPath:      "/tmp/data",
 	}
 	if err := writeState(state); err != nil {
 		t.Fatalf("writeState: %v", err)
@@ -34,11 +37,14 @@ func TestStateRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readState: %v", err)
 	}
-	if got.PID != 12345 {
-		t.Errorf("PID = %d, want 12345", got.PID)
+	if got.ContainerID != "abc123def456" {
+		t.Errorf("ContainerID = %q, want %q", got.ContainerID, "abc123def456")
 	}
-	if got.Binary != "/usr/bin/otelcol-contrib" {
-		t.Errorf("Binary = %q, want /usr/bin/otelcol-contrib", got.Binary)
+	if got.ContainerName != "lotel-collector" {
+		t.Errorf("ContainerName = %q, want %q", got.ContainerName, "lotel-collector")
+	}
+	if got.Image != "otel/opentelemetry-collector-contrib:latest" {
+		t.Errorf("Image = %q, want %q", got.Image, "otel/opentelemetry-collector-contrib:latest")
 	}
 
 	// Remove state.
@@ -54,59 +60,11 @@ func TestStateRoundtrip(t *testing.T) {
 	}
 }
 
-func TestResolveConfig(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-
-	// Create the .lotel directory that resolveConfig writes to.
-	if err := os.MkdirAll(filepath.Join(tmp, ".lotel"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a source config with /data/ references.
-	srcDir := filepath.Join(tmp, "src")
-	if err := os.MkdirAll(srcDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	srcConfig := filepath.Join(srcDir, "config.yaml")
-	if err := os.WriteFile(srcConfig, []byte("path: /data/traces/traces.jsonl\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	dataPath := filepath.Join(tmp, "mydata")
-	resolved, err := resolveConfig(srcConfig, dataPath)
-	if err != nil {
-		t.Fatalf("resolveConfig: %v", err)
-	}
-
-	content, err := os.ReadFile(resolved)
-	if err != nil {
-		t.Fatalf("reading resolved config: %v", err)
-	}
-
-	expected := "path: " + dataPath + "/traces/traces.jsonl\n"
-	if string(content) != expected {
-		t.Errorf("resolved config = %q, want %q", string(content), expected)
-	}
-}
-
-func TestIsProcessAlive_DeadPID(t *testing.T) {
-	// PID 0 should not be alive.
-	alive := isProcessAlive(&State{PID: 0})
-	if alive {
-		t.Error("PID 0 should not be alive")
-	}
-
-	// Nil state should not be alive.
-	alive = isProcessAlive(nil)
-	if alive {
-		t.Error("nil state should not be alive")
-	}
-
-	// A very high PID that almost certainly doesn't exist.
-	alive = isProcessAlive(&State{PID: 999999999})
-	if alive {
-		t.Error("PID 999999999 should not be alive")
+func TestIsContainerRunning_NoDocker(t *testing.T) {
+	// When no container named lotel-collector exists, should return false.
+	running := isContainerRunning()
+	if running {
+		t.Error("expected false when no lotel-collector container exists")
 	}
 }
 
