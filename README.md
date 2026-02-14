@@ -2,6 +2,10 @@
 
 A CLI tool for local OpenTelemetry telemetry collection, querying, and management. Runs the OTel Collector as a local subprocess and stores telemetry in DuckDB for fast querying.
 
+## Scope
+
+`lotel` is designed for **one developer machine / one host** while building and debugging software locally. It is intentionally not a distributed telemetry backend and is not meant to replace production observability stacks.
+
 ## Quick Start
 
 ```bash
@@ -69,6 +73,15 @@ All query commands output JSON to stdout. Exit codes:
 - `1`: error or unhealthy status
 
 This makes lotel suitable for scripted and agent-driven workflows.
+
+### AI Coding Agent Workflows
+
+`lotel` works well with AI coding agents (like Cursor agents, Claude Code, or similar tools) because commands are local, deterministic, and JSON-first. An agent can:
+
+- start and health-check telemetry collection before running app/tests
+- ingest newly produced telemetry artifacts after test runs
+- query traces/metrics/logs with filters (`--service`, `--since`) to validate behavior
+- use non-zero exit codes to fail fast in automation loops
 
 ## Architecture
 
