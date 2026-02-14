@@ -1,0 +1,16 @@
+[
+  {
+    "trace_id": "trace-789",
+    "span_id": "span-101",
+    "operation_name": "kafka.publish",
+    "start_time": "2025-06-03T10:32:58.310753-04:00",
+    "duration": 100000000,
+    "status": "ERROR",
+    "attributes": {
+      "error_type": "kafka_connection_failed",
+      "kafka.topic": "test.streaming.results",
+      "message.type": "chunk"
+    },
+    "events": []
+  }
+]

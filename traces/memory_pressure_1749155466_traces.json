@@ -1,0 +1,67 @@
+[
+  {
+    "trace_id": "trace-mem-0",
+    "span_id": "span-mem-0",
+    "operation_name": "result.stream",
+    "start_time": "2025-06-05T16:31:06.318931-04:00",
+    "duration": 2000000000,
+    "status": "OK",
+    "attributes": {
+      "stream.id": "memory-pressure-stream-0",
+      "task.id": "task-memory-0"
+    },
+    "events": []
+  },
+  {
+    "trace_id": "trace-mem-1",
+    "span_id": "span-mem-1",
+    "operation_name": "result.stream",
+    "start_time": "2025-06-05T16:31:05.318932-04:00",
+    "duration": 3000000000,
+    "status": "OK",
+    "attributes": {
+      "stream.id": "memory-pressure-stream-1",
+      "task.id": "task-memory-1"
+    },
+    "events": []
+  },
+  {
+    "trace_id": "trace-mem-2",
+    "span_id": "span-mem-2",
+    "operation_name": "result.stream",
+    "start_time": "2025-06-05T16:31:04.318932-04:00",
+    "duration": 4000000000,
+    "status": "OK",
+    "attributes": {
+      "stream.id": "memory-pressure-stream-2",
+      "task.id": "task-memory-2"
+    },
+    "events": []
+  },
+  {
+    "trace_id": "trace-mem-3",
+    "span_id": "span-mem-3",
+    "operation_name": "result.stream",
+    "start_time": "2025-06-05T16:31:03.318933-04:00",
+    "duration": 5000000000,
+    "status": "OK",
+    "attributes": {
+      "stream.id": "memory-pressure-stream-3",
+      "task.id": "task-memory-3"
+    },
+    "events": []
+  },
+  {
+    "trace_id": "trace-mem-4",
+    "span_id": "span-mem-4",
+    "operation_name": "result.stream",
+    "start_time": "2025-06-05T16:31:02.318933-04:00",
+    "duration": 6000000000,
+    "status": "OK",
+    "attributes": {
+      "stream.id": "memory-pressure-stream-4",
+      "task.id": "task-memory-4"
+    },
+    "events": []
+  }
+]

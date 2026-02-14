@@ -1,0 +1,30 @@
+[
+  {
+    "name": "result_streamer_active_streams",
+    "type": "gauge",
+    "value": 10,
+    "labels": {},
+    "timestamp": "2025-06-05T16:31:06.215692-04:00"
+  },
+  {
+    "name": "result_streamer_chunks_processed_total",
+    "type": "counter",
+    "value": 200,
+    "labels": {},
+    "timestamp": "2025-06-05T16:31:06.215692-04:00"
+  },
+  {
+    "name": "result_streamer_batches_published_total",
+    "type": "counter",
+    "value": 40,
+    "labels": {},
+    "timestamp": "2025-06-05T16:31:06.215692-04:00"
+  },
+  {
+    "name": "result_streamer_stream_duration_seconds",
+    "type": "histogram",
+    "value": 0.75,
+    "labels": {},
+    "timestamp": "2025-06-05T16:31:06.215692-04:00"
+  }
+]

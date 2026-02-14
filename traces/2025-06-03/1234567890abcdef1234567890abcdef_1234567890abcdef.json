@@ -1,0 +1,44 @@
+{
+  "trace_id": "1234567890abcdef1234567890abcdef",
+  "span_id": "1234567890abcdef",
+  "name": "HTTP POST",
+  "start_time": "2025-06-03T11:15:47.809894Z",
+  "end_time": "2025-06-03T11:15:47.809896Z",
+  "attributes": [
+    {
+      "key": "http.request.method",
+      "value": {
+        "stringValue": "POST"
+      }
+    },
+    {
+      "key": "http.route",
+      "value": {
+        "stringValue": "/api/v1/prompts"
+      }
+    },
+    {
+      "key": "http.response.status_code",
+      "value": {
+        "intValue": 202
+      }
+    },
+    {
+      "key": "request.id",
+      "value": {
+        "stringValue": "req_123456789"
+      }
+    },
+    {
+      "key": "http.user_agent",
+      "value": {
+        "stringValue": "v6r-api-test-client/1.0.0"
+      }
+    }
+  ],
+  "events": [],
+  "status": {
+    "code": "OK",
+    "message": ""
+  }
+}

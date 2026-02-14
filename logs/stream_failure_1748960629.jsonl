@@ -1,0 +1,2 @@
+{"level":"info","test_id":"stream_failure_1748960629","component":"result-streamer","component":"stream-manager","stream_id":"failing-stream-456","task_id":"task-failure-456","message":"Stream registered"}
+{"level":"info","test_id":"stream_failure_1748960629","component":"result-streamer","component":"stream-manager","stream_id":"failing-stream-456","status":"active","stats":{"ChunksReceived":0,"BytesReceived":0,"TokensUsed":0,"Errors":0},"duration":0.171959,"message":"Stream removed"}

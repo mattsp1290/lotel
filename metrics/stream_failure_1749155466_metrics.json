@@ -1,0 +1,11 @@
+[
+  {
+    "name": "result_streamer_stream_errors_total",
+    "type": "counter",
+    "value": 1,
+    "labels": {
+      "error_type": "stream_failure"
+    },
+    "timestamp": "2025-06-05T16:31:06.004361-04:00"
+  }
+]

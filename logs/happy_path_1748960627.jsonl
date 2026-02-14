@@ -1,0 +1,3 @@
+{"level":"info","test_id":"happy_path_1748960627","component":"result-streamer","component":"stream-manager","stream_id":"happy-stream-123","task_id":"task-happy-123","message":"Stream registered"}
+{"level":"info","test_id":"happy_path_1748960627","component":"result-streamer","component":"result-streamer","stream_id":"happy-stream-123","message":"Stream completed (done=true)"}
+{"level":"info","test_id":"happy_path_1748960627","component":"result-streamer","component":"stream-manager","stream_id":"happy-stream-123","status":"active","stats":{"ChunksReceived":0,"BytesReceived":0,"TokensUsed":0,"Errors":0},"duration":0.463542,"message":"Stream removed"}

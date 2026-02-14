@@ -1,0 +1,11 @@
+[
+  {
+    "name": "kafka_publish_errors_total",
+    "type": "counter",
+    "value": 1,
+    "labels": {
+      "error_type": "connection_failed"
+    },
+    "timestamp": "2025-06-03T10:33:00.310755-04:00"
+  }
+]

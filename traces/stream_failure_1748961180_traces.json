@@ -1,0 +1,16 @@
+[
+  {
+    "trace_id": "trace-456",
+    "span_id": "span-789",
+    "operation_name": "result.stream",
+    "start_time": "2025-06-03T10:32:57.204451-04:00",
+    "duration": 2000000000,
+    "status": "ERROR",
+    "attributes": {
+      "error.type": "stream_connection_lost",
+      "stream.id": "failing-stream-456",
+      "task.id": "task-failure-456"
+    },
+    "events": []
+  }
+]

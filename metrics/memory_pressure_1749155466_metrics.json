@@ -1,0 +1,23 @@
+[
+  {
+    "name": "result_streamer_batch_size",
+    "type": "histogram",
+    "value": 15,
+    "labels": {},
+    "timestamp": "2025-06-05T16:31:06.318934-04:00"
+  },
+  {
+    "name": "result_streamer_active_streams",
+    "type": "gauge",
+    "value": 5,
+    "labels": {},
+    "timestamp": "2025-06-05T16:31:06.318934-04:00"
+  },
+  {
+    "name": "result_streamer_chunks_processed_total",
+    "type": "counter",
+    "value": 250,
+    "labels": {},
+    "timestamp": "2025-06-05T16:31:06.318934-04:00"
+  }
+]

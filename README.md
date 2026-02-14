@@ -2,42 +2,33 @@
 
 A comprehensive Docker-based telemetry verification environment designed for AI agents to validate traces, metrics, and logs are properly collected from any application. Features OpenTelemetry Collector, StatsD, Prometheus, Grafana, Jaeger, and Filebeat with file-based exports for integration testing.
 
-**🚀 NEW: Now with SigNoz integration!** Get traces, metrics, and logs in a single pane of glass while maintaining file exports for testing. See [QUICK_START_SIGNOZ.md](QUICK_START_SIGNOZ.md) for details.
-
 ## 🚀 Quick Start
 
-### Option 1: Original Stack
-1. **Setup the environment:**
-   ```bash
-   ./scripts/setup/setup-telemetry-env.sh
-   ```
+### Start the Stack
+```bash
+# 1. Setup environment (first time only)
+./scripts/setup/setup-telemetry-env.sh
 
-2. **Start the telemetry stack:**
-   ```bash
-   ./scripts/setup/start-telemetry-stack.sh
-   ```
+# 2. Start all services
+./scripts/setup/start-telemetry-stack.sh
 
-### Option 2: SigNoz-Enhanced Stack (Recommended)
-1. **Start the SigNoz-enhanced stack:**
-   ```bash
-   ./scripts/setup/start-signoz-stack.sh
-   ```
+# 3. Verify everything is working
+./scripts/verification/bash/check_telemetry_health.sh
+```
 
-2. **Access SigNoz UI:**
-   - Open http://localhost:3301 in your browser
-   - All your existing integrations continue to work!
+### Access Dashboards
+- **Jaeger (Traces)**: http://localhost:16686
+- **Grafana (Metrics)**: http://localhost:3000 (admin/admin)
+- **Prometheus**: http://localhost:9090
+- **OTel Collector Health**: http://localhost:13133
 
-3. **Verify everything is working:**
-   ```bash
-   ./scripts/verification/bash/check_telemetry_health.sh
-   ```
+### Stop the Stack
+```bash
+./scripts/setup/stop-telemetry-stack.sh
 
-4. **Access the dashboards:**
-   - **SigNoz**: http://localhost:3301 (NEW - unified observability)
-   - **Grafana**: http://localhost:3000 (admin/admin)
-   - **Prometheus**: http://localhost:9090
-   - **Jaeger**: http://localhost:16686
-   - **OpenTelemetry Health**: http://localhost:13133
+# Or with data cleanup
+./scripts/setup/stop-telemetry-stack.sh --clean-data
+```
 
 ## 📋 Overview
 
@@ -51,8 +42,6 @@ This environment provides a complete local telemetry verification stack that:
 - ✅ **Runs entirely in Docker** for consistent environments
 - ✅ **Includes verification scripts** in Python, Go, and Bash
 - ✅ **AI Agent Optimized** - designed for automated observability verification
-- ✅ **Dual Export Mode** - data flows to both SigNoz and file system
-- ✅ **Unified Observability** - SigNoz provides APM, logs, and metrics in one UI
 
 ## 🏗️ Architecture
 
@@ -113,7 +102,7 @@ local-otel/
 
 | Service | Port | Purpose | Health Check |
 |---------|------|---------|--------------|
-| **OpenTelemetry Collector** | 4317 (gRPC), 4318 (HTTP) | Central telemetry collection | http://localhost:13133 |
+| **OTel Collector** | 4317 (gRPC), 4318 (HTTP) | Central telemetry collection + disk export | http://localhost:13133 |
 | **StatsD** | 8125 (UDP), 8126 (Admin) | High-performance metrics | http://localhost:8126 |
 | **Prometheus** | 9090 | Metrics storage and querying | http://localhost:9090/-/healthy |
 | **Grafana** | 3000 | Visualization dashboards | http://localhost:3000/api/health |
@@ -123,6 +112,8 @@ local-otel/
 ## 📊 Telemetry Endpoints
 
 ### For Application Integration
+
+Send telemetry data to these endpoints:
 
 - **OTLP Traces/Metrics (gRPC)**: `localhost:4317`
 - **OTLP Traces/Metrics (HTTP)**: `localhost:4318`
@@ -141,7 +132,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 trace.set_tracer_provider(TracerProvider())
 tracer = trace.get_tracer(__name__)
 
-# Configure OTLP exporter
+# Configure OTLP exporter - use standard ports
 otlp_exporter = OTLPSpanExporter(
     endpoint="http://localhost:4318/v1/traces",
 )

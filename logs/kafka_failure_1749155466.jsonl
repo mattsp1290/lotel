@@ -1,0 +1,1 @@
+{"level":"ERROR","message":"Kafka publish failed","timestamp":"2025-06-05T16:31:05.105346-04:00","fields":{"error":"mock kafka producer failure","stream_id":"kafka-failure-stream","test_id":"kafka_failure_1749155466"}}
