@@ -34,14 +34,16 @@ A comprehensive Docker-based telemetry verification environment designed for AI 
 
 This environment provides a complete local telemetry verification stack that:
 
-- ✅ **Collects traces, metrics, and logs** from any application
-- ✅ **Exports data to files** for integration testing
-- ✅ **Provides real-time visualization** with Grafana and Jaeger
-- ✅ **Supports StatsD metrics** for high-performance metric collection
-- ✅ **Processes logs** with Filebeat for correlation and analysis
+- ✅ **Collects traces, metrics, and logs** from any application via OpenTelemetry
+- ✅ **Exports data to files** for integration testing and AI agent verification
+- ✅ **Provides real-time visualization** with Grafana and Jaeger (optional)
+- ⚠️ **StatsD metrics support** (currently broken - migrate to OTLP recommended)
+- ✅ **Processes logs** with Filebeat for correlation and analysis (optional)
 - ✅ **Runs entirely in Docker** for consistent environments
 - ✅ **Includes verification scripts** in Python, Go, and Bash
 - ✅ **AI Agent Optimized** - designed for automated observability verification
+
+**Important**: Only the **OTel Collector** is required for file-based exports. All other services (StatsD, Prometheus, Grafana, Jaeger, Filebeat) are optional. See [Architecture Documentation](docs/file-based-architecture.md) for details.
 
 ## 🏗️ Architecture
 
@@ -100,14 +102,16 @@ local-otel/
 
 ## 🔧 Services
 
-| Service | Port | Purpose | Health Check |
-|---------|------|---------|--------------|
-| **OTel Collector** | 4317 (gRPC), 4318 (HTTP) | Central telemetry collection + disk export | http://localhost:13133 |
-| **StatsD** | 8125 (UDP), 8126 (Admin) | High-performance metrics | http://localhost:8126 |
-| **Prometheus** | 9090 | Metrics storage and querying | http://localhost:9090/-/healthy |
-| **Grafana** | 3000 | Visualization dashboards | http://localhost:3000/api/health |
-| **Jaeger** | 16686 (UI), 14250 (gRPC) | Distributed tracing | http://localhost:16686 |
-| **Filebeat** | 5066 (HTTP) | Log processing and shipping | Internal health checks |
+| Service | Port | Purpose | Required? | Health Check |
+|---------|------|---------|-----------|--------------|
+| **OTel Collector** | 4317 (gRPC), 4318 (HTTP) | Central telemetry collection + disk export | ✅ **YES** | http://localhost:13133 |
+| **StatsD** | 8125 (UDP), 8126 (Admin) | Alternative metrics input | ❌ NO (broken) | http://localhost:8126 |
+| **Prometheus** | 9090 | Metrics storage and querying | ❌ NO | http://localhost:9090/-/healthy |
+| **Grafana** | 3000 | Visualization dashboards | ❌ NO | http://localhost:3000/api/health |
+| **Jaeger** | 16686 (UI), 14250 (gRPC) | Distributed tracing visualization | ❌ NO | http://localhost:16686 |
+| **Filebeat** | 5066 (HTTP) | Log post-processing | ❌ NO | Internal health checks |
+
+**Note**: For file-based exports only, you need just the OTel Collector. See [docs/file-based-architecture.md](docs/file-based-architecture.md).
 
 ## 📊 Telemetry Endpoints
 
@@ -115,9 +119,11 @@ local-otel/
 
 Send telemetry data to these endpoints:
 
-- **OTLP Traces/Metrics (gRPC)**: `localhost:4317`
-- **OTLP Traces/Metrics (HTTP)**: `localhost:4318`
-- **StatsD Metrics (UDP)**: `localhost:8125`
+- **OTLP Traces/Metrics/Logs (gRPC)**: `localhost:4317` ✅ **RECOMMENDED**
+- **OTLP Traces/Metrics/Logs (HTTP)**: `localhost:4318` ✅ **RECOMMENDED**
+- **StatsD Metrics (UDP)**: `localhost:8125` ⚠️ **BROKEN** - See [migration guide](docs/statsd-to-otlp-migration.md)
+
+**OTLP (OpenTelemetry Protocol)** is the recommended and working protocol. StatsD integration is currently broken due to a configuration mismatch. See the [StatsD to OTLP Migration Guide](docs/statsd-to-otlp-migration.md) for migration instructions or fixes.
 
 ### Example Usage
 
@@ -372,6 +378,34 @@ The telemetry environment is optimized for development use:
 - **High throughput**: Handles thousands of metrics/traces per second
 - **Minimal overhead**: <5% performance impact on your application
 - **Efficient storage**: Compressed file exports with rotation
+
+## 📚 Documentation
+
+### Start Here
+
+- **[Quick Reference](docs/QUICK_REFERENCE.md)** - Essential commands and code examples
+- **[Known Issues](docs/KNOWN_ISSUES.md)** - ⚠️ Current issues (StatsD is broken)
+
+### Core Documentation
+
+- **[File-Based Architecture](docs/file-based-architecture.md)** - What's required vs. optional for file exports
+- **[StatsD to OTLP Migration Guide](docs/statsd-to-otlp-migration.md)** - Fix StatsD or migrate to OTLP (recommended)
+- **[Application Integration Guide](docs/application-integration-guide.md)** - Integrate your application
+
+### Example Documentation
+
+- **[Telemetry Patterns](examples/common/telemetry-patterns.md)** - Universal patterns for traces, metrics, and logs
+- **[Troubleshooting Guide](examples/common/troubleshooting.md)** - Diagnose and fix common issues
+- **[Performance Tips](examples/common/performance-tips.md)** - Optimize telemetry overhead
+
+### Configuration Files
+
+- **[Full OTel Config](docker/configs/otel/otel-collector-config.yaml)** - Production-ready configuration (137 lines)
+- **[Minimal OTel Config](docker/configs/otel/otel-collector-config-minimal.yaml)** - File exports only (50 lines)
+
+### Implementation Details
+
+- **[Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md)** - Documentation implementation notes
 
 ## 🔮 Future Enhancements
 
