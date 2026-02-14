@@ -4,7 +4,7 @@ A CLI tool for local OpenTelemetry telemetry collection, querying, and managemen
 
 ## Scope
 
-`lotel` is designed for **one developer machine / one host** while building and debugging software locally. It is intentionally not a distributed telemetry backend and is not meant to replace production observability stacks.
+`lotel` is designed for **one developer machine / one host** while building and debugging software locally. It is intentionally not a distributed telemetry backend and is not meant to replace production observability stacks. Its goal is to provide local development with a coding agent a full loop that lets you replicate the observability experience you'd have of a deployed service. Your agent has probably always had access to logs. But adding in traces lets them start debugging things like call length or answer questions like "Are we actually making API calls here?".
 
 ## Quick Start
 
