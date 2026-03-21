@@ -16,3 +16,4 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 tokio-util = { workspace = true }
 thiserror = { workspace = true }
+dirs = "6"
