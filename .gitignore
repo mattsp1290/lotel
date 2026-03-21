@@ -1,20 +1,12 @@
-# Binaries for programs and plugins
+# Binaries
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-lotel
 
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Go workspace file
-go.work
-go.work.sum
+# Rust build artifacts
+target/
 
 # env file
 .env
@@ -31,9 +23,6 @@ logs/
 # DuckDB files
 *.db
 *.db.wal
-
-# Rust build artifacts
-target/
 
 # Beads cache
 .beads/.cache/
