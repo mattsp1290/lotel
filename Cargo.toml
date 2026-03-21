@@ -1,0 +1,24 @@
+[workspace]
+members = [
+    "crates/lotel-collector",
+    "crates/lotel-storage",
+    "crates/lotel-cli",
+]
+resolver = "2"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+tonic = "0.13"
+prost = "0.13"
+axum = "0.8"
+duckdb = { version = "1", features = ["bundled", "chrono"] }
+opentelemetry-proto = { version = "0.31", features = ["gen-tonic", "trace", "metrics", "logs", "with-serde"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }

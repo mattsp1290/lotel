@@ -32,5 +32,8 @@ logs/
 *.db
 *.db.wal
 
+# Rust build artifacts
+target/
+
 # Beads cache
 .beads/.cache/

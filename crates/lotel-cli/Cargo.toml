@@ -1,0 +1,13 @@
+[package]
+name = "lotel-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+lotel-collector = { path = "../lotel-collector" }
+lotel-storage = { path = "../lotel-storage" }
+chrono = { workspace = true }
+anyhow = { workspace = true }
