@@ -1,6 +1,6 @@
 # lotel — Local OpenTelemetry
 
-A CLI tool for local OpenTelemetry telemetry collection, querying, and management. Runs the OTel Collector as a Docker container and stores telemetry in DuckDB for fast querying.
+A CLI tool for local OpenTelemetry telemetry collection, querying, and management. Runs a native OTLP collector and stores telemetry in DuckDB for fast querying.
 
 ## Scope
 
@@ -9,37 +9,34 @@ A CLI tool for local OpenTelemetry telemetry collection, querying, and managemen
 ## Quick Start
 
 ```bash
-# Ensure Docker is installed and running
-# See: https://docs.docker.com/get-docker/
-
 # Build lotel
-go build -o lotel ./cmd/lotel
+cargo build --release
 
 # Start the collector
-./lotel start --wait
+./target/release/lotel-cli start --wait
 
 # Send telemetry to localhost:4317 (gRPC) or localhost:4318 (HTTP)
 # Then ingest and query:
-./lotel ingest
-./lotel query traces --service my-app
-./lotel query metrics --service my-app
-./lotel query logs --service my-app
+./target/release/lotel-cli ingest
+./target/release/lotel-cli query traces --service my-app
+./target/release/lotel-cli query metrics --service my-app
+./target/release/lotel-cli query logs --service my-app
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `lotel start [--wait]` | Start the OTel Collector container |
-| `lotel stop` | Stop the collector |
-| `lotel status` | Show collector status (JSON) |
-| `lotel health` | Check collector health (exit 0/1) |
-| `lotel ingest` | Ingest JSONL files into DuckDB |
-| `lotel query traces` | Query traces (JSON output) |
-| `lotel query metrics` | Query metrics (JSON output) |
-| `lotel query logs` | Query logs (JSON output) |
-| `lotel query aggregate` | Compute avg/min/max for a metric |
-| `lotel prune` | Delete telemetry older than threshold |
+| `lotel-cli start [--wait]` | Start the OTel Collector |
+| `lotel-cli stop` | Stop the collector |
+| `lotel-cli status` | Show collector status (JSON) |
+| `lotel-cli health` | Check collector health (exit 0/1) |
+| `lotel-cli ingest` | Ingest JSONL files into DuckDB |
+| `lotel-cli query traces` | Query traces (JSON output) |
+| `lotel-cli query metrics` | Query metrics (JSON output) |
+| `lotel-cli query logs` | Query logs (JSON output) |
+| `lotel-cli query aggregate` | Compute avg/min/max for a metric |
+| `lotel-cli prune` | Delete telemetry older than threshold |
 
 ## Query Options
 
@@ -56,14 +53,14 @@ All query commands support:
 
 ```bash
 # Traces from the last hour
-lotel query traces --service my-app --since 1h
+lotel-cli query traces --service my-app --since 1h
 
 # Metric aggregation over a time window
-lotel query aggregate --metric http_request_duration --service my-app --since 24h
+lotel-cli query aggregate --metric http_request_duration --service my-app --since 24h
 
 # Prune data older than 7 days (dry run first)
-lotel prune --older-than 7d --dry-run
-lotel prune --older-than 7d
+lotel-cli prune --older-than 7d --dry-run
+lotel-cli prune --older-than 7d
 ```
 
 ## Output Contract
@@ -87,17 +84,36 @@ This makes lotel suitable for scripted and agent-driven workflows.
 
 ```
 Application → OTLP (gRPC :4317 / HTTP :4318)
-    → OTel Collector (Docker container)
-        → ~/.lotel/data/{traces,metrics,logs}/*.jsonl
-            → lotel ingest → DuckDB (~/.lotel/data/lotel.db)
-                → lotel query → JSON output
+    → lotel-collector (native process)
+        → Batch processor
+            → ~/.lotel/data/{traces,metrics,logs}/*.jsonl
+                → lotel-cli ingest → DuckDB (~/.lotel/data/lotel.db)
+                    → lotel-cli query → JSON output
+```
+
+## Library Usage
+
+The collector is also available as a Rust library:
+
+```toml
+[dependencies]
+lotel-collector = { path = "crates/lotel-collector" }
+lotel-storage = { path = "crates/lotel-storage" }
+```
+
+```rust
+let collector = lotel_collector::Collector::with_defaults()?;
+let handle = collector.start()?;
+handle.wait_healthy(Duration::from_secs(30)).await?;
+// ... application runs, sends OTLP data ...
+handle.shutdown().await;
 ```
 
 ## Data Storage
 
 - **Raw**: JSONL files written by the collector to `~/.lotel/data/{traces,metrics,logs}/`
-- **Indexed**: DuckDB database at `~/.lotel/data/lotel.db` (populated by `lotel ingest`)
-- **State**: Container ID and config at `~/.lotel/collector.state`
+- **Indexed**: DuckDB database at `~/.lotel/data/lotel.db` (populated by `lotel-cli ingest`)
+- **State**: PID and config at `~/.lotel/collector.state`
 - **Config**: Default config at `~/.lotel/collector-config.yaml` (auto-generated)
 
 ## Configuration
@@ -108,19 +124,10 @@ lotel looks for collector config in this order:
 
 The default config provides OTLP receivers (gRPC + HTTP), batch processing, and file exporters for all three signals.
 
-## Verification
-
-```bash
-# Run the end-to-end verification script
-pip install requests
-python3 scripts/verify.py
-```
-
 ## Requirements
 
-- Go 1.24+
-- Docker
-- CGO enabled (for DuckDB)
+- Rust stable toolchain (1.80+)
+- No Docker required — collector runs as a native process
 
 ## License
 

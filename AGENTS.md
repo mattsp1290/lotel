@@ -14,49 +14,49 @@ Treat telemetry as a first-class test artifact, not an optional extra.
 
 ## What lotel does
 
-`lotel` manages a local OTel Collector subprocess, ingests JSONL signal data into DuckDB, and exposes JSON query commands for agent-friendly checks.
+`lotel` manages a local OTel Collector process, ingests JSONL signal data into DuckDB, and exposes JSON query commands for agent-friendly checks.
 
 Core command surface:
 
-- `lotel start --wait`
-- `lotel stop`
-- `lotel status`
-- `lotel health`
-- `lotel ingest`
-- `lotel query traces`
-- `lotel query metrics`
-- `lotel query logs`
-- `lotel query aggregate`
-- `lotel prune`
+- `lotel-cli start --wait`
+- `lotel-cli stop`
+- `lotel-cli status`
+- `lotel-cli health`
+- `lotel-cli ingest`
+- `lotel-cli query traces`
+- `lotel-cli query metrics`
+- `lotel-cli query logs`
+- `lotel-cli query aggregate`
+- `lotel-cli prune`
 
 ## Standard operating loop
 
 Use this loop by default unless the task explicitly does not involve runtime behavior.
 
 ```bash
-# 1) Ensure collector is up
-go build -o lotel ./cmd/lotel
-./lotel start --wait
-./lotel health
+# 1) Build and ensure collector is up
+cargo build --release
+./target/release/lotel-cli start --wait
+./target/release/lotel-cli health
 
 # 2) Run app/tests that emit OTLP telemetry
 #    OTLP gRPC: localhost:4317
 #    OTLP HTTP: localhost:4318
 
 # 3) Ingest fresh telemetry
-./lotel ingest
+./target/release/lotel-cli ingest
 
 # 4) Query and verify expected behavior
-./lotel query traces --service <service-name> --since 15m
-./lotel query metrics --service <service-name> --since 15m
-./lotel query logs --service <service-name> --since 15m
+./target/release/lotel-cli query traces --service <service-name> --since 15m
+./target/release/lotel-cli query metrics --service <service-name> --since 15m
+./target/release/lotel-cli query logs --service <service-name> --since 15m
 ```
 
 ## Workflow A: Active development
 
 Use while implementing features and refactors.
 
-1. Start `lotel` early in the session (`start --wait`, then `health`).
+1. Start `lotel-cli` early in the session (`start --wait`, then `health`).
 2. After each meaningful code change + run, execute `ingest`.
 3. Confirm expected spans exist for key paths (main request, DB call, external API call).
 4. Check metrics for obvious regressions (latency growth, error spikes).
@@ -65,8 +65,8 @@ Use while implementing features and refactors.
 Suggested checks:
 
 ```bash
-./lotel query traces --service <service-name> --since 10m --limit 50
-./lotel query aggregate --metric <duration-metric> --service <service-name> --since 10m
+./target/release/lotel-cli query traces --service <service-name> --since 10m --limit 50
+./target/release/lotel-cli query aggregate --metric <duration-metric> --service <service-name> --since 10m
 ```
 
 ## Workflow B: Debugging and incident reproduction
@@ -78,14 +78,6 @@ Use when behavior is wrong, flaky, or unexpectedly slow.
 3. Inspect traces first for path/call timing and missing downstream spans.
 4. Correlate with logs/metrics in the same time window.
 5. Repeat after each fix attempt and compare outputs.
-
-Debug focus examples:
-
-```bash
-./lotel query traces --service <service-name> --since 30m --limit 200
-./lotel query logs --service <service-name> --since 30m --limit 200
-./lotel query aggregate --metric <duration-metric> --service <service-name> --since 30m
-```
 
 ## Workflow C: Pre-production readiness checks
 
@@ -100,22 +92,14 @@ Checklist:
 - error paths emit logs with enough diagnostic context
 - no obvious telemetry dropouts in expected windows
 
-Example gate commands:
-
-```bash
-./lotel ingest
-./lotel query traces --service <service-name> --since 1h --limit 500
-./lotel query metrics --service <service-name> --since 1h --limit 500
-./lotel query logs --service <service-name> --since 1h --limit 500
-```
-
 ## Key paths
 
-- `cmd/lotel/main.go` - CLI entrypoint (Cobra commands)
-- `internal/collector/` - subprocess lifecycle (start/stop/status/health)
-- `internal/config/` - config resolution and defaults
-- `internal/storage/` - DuckDB schema, JSONL ingestion, query, prune
-- `scripts/verify.py` - end-to-end verification script
+- `crates/lotel-cli/src/main.rs` - CLI entrypoint (clap commands)
+- `crates/lotel-cli/src/daemon.rs` - process lifecycle (start/stop/status/health)
+- `crates/lotel-collector/src/` - OTLP receivers, batch processor, file exporter, pipeline
+- `crates/lotel-collector/src/config.rs` - config resolution and defaults
+- `crates/lotel-storage/src/` - DuckDB schema, JSONL ingestion, query, prune
+- `PARITY.md` - Rust rewrite parity tracker
 
 ## Issue tracking (bd)
 
@@ -130,15 +114,15 @@ bd close <id>  # Complete work
 Must pass before closing work:
 
 ```bash
-go test ./...
-go build ./...
+cargo test --workspace
+cargo build --workspace
 ```
 
 ## Landing the plane
 
 When ending a session, do all of the following:
 
-1. Run quality gates: `go test ./... && go build ./...`
+1. Run quality gates: `cargo test --workspace && cargo build --workspace`
 2. Update issue status: `bd close <id>`
 3. Sync and push:
    ```bash
