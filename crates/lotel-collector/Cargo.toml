@@ -18,7 +18,7 @@ tokio-util = { workspace = true }
 thiserror = { workspace = true }
 dirs = "6"
 tokio-stream = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["json"] }
 tempfile = "3"
