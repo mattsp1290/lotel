@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod exporter;
+pub mod extension;
 pub mod model;
 pub mod pipeline;
 pub mod processor;
