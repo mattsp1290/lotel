@@ -51,10 +51,8 @@ impl BatchProcessor {
                     match msg {
                         Some(data) => {
                             buffer.push(data);
-                            // Immediate flush if exceeding max size.
-                            if buffer.len() >= self.send_batch_max_size {
-                                flush(&mut buffer, &tx).await;
-                            } else if buffer.len() >= self.send_batch_size {
+                            // Flush if reaching batch size threshold.
+                            if buffer.len() >= self.send_batch_size {
                                 flush(&mut buffer, &tx).await;
                             }
                         }

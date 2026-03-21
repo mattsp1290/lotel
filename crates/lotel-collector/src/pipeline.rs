@@ -2,8 +2,8 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
@@ -13,9 +13,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::CollectorConfig;
+use crate::config::{CollectorConfig, parse_duration};
 use crate::exporter::file::FileExporter;
 use crate::extension::health::HealthCheckExtension;
+use crate::ingestion;
 use crate::processor::batch::BatchProcessor;
 use crate::receiver::grpc::OtlpGrpcReceiver;
 use crate::receiver::http::OtlpHttpReceiver;
@@ -65,8 +66,8 @@ impl Pipeline {
         // Resolve exporter paths from config.
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let resolve_path = |path: &str| -> PathBuf {
-            if path.starts_with("~/") {
-                home.join(&path[2..])
+            if let Some(stripped) = path.strip_prefix("~/") {
+                home.join(stripped)
             } else {
                 PathBuf::from(path)
             }
@@ -87,6 +88,14 @@ impl Pipeline {
             .get("file/logs")
             .map(|e| resolve_path(&e.path))
             .unwrap_or_else(|| home.join(".lotel/data/logs/logs.jsonl"));
+
+        // Derive data_path for ingestion before paths are moved into exporter.
+        // traces_path is like ~/.lotel/data/traces/traces.jsonl → grandparent is data dir.
+        let ingest_data_path = traces_path
+            .parent()
+            .and_then(|p| p.parent())
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf();
 
         // Create channels: receivers -> processor -> exporter.
         let (recv_tx, recv_rx) = mpsc::channel::<SignalData>(4096);
@@ -150,6 +159,20 @@ impl Pipeline {
             }
         }));
 
+        // Spawn periodic ingestion task (if configured).
+        if let Some(ref ingestion_config) = config.ingestion
+            && ingestion_config.enabled
+        {
+            let interval = parse_duration(&ingestion_config.interval);
+            let db_path = ingest_data_path.join("lotel.db");
+
+            let ingest_cancel = cancel.clone();
+            handles.push(tokio::spawn(async move {
+                ingestion::run_ingestion_task(interval, ingest_data_path, db_path, ingest_cancel)
+                    .await;
+            }));
+        }
+
         // Mark as ready.
         ready.store(true, Ordering::Relaxed);
 
@@ -159,15 +182,15 @@ impl Pipeline {
 
 fn parse_batch_timeout(s: &str) -> Duration {
     // Support simple formats like "1s", "500ms".
-    if let Some(secs) = s.strip_suffix('s') {
-        if let Ok(n) = secs.parse::<f64>() {
-            return Duration::from_secs_f64(n);
-        }
+    if let Some(secs) = s.strip_suffix('s')
+        && let Ok(n) = secs.parse::<f64>()
+    {
+        return Duration::from_secs_f64(n);
     }
-    if let Some(ms) = s.strip_suffix("ms") {
-        if let Ok(n) = ms.parse::<u64>() {
-            return Duration::from_millis(n);
-        }
+    if let Some(ms) = s.strip_suffix("ms")
+        && let Ok(n) = ms.parse::<u64>()
+    {
+        return Duration::from_millis(n);
     }
     Duration::from_secs(1)
 }

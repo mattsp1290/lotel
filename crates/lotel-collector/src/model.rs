@@ -107,10 +107,10 @@ impl Serialize for OtlpNano {
 /// Extract service.name from resource attributes, defaulting to "unknown".
 pub fn extract_service_name(attrs: &[KeyValue]) -> String {
     for kv in attrs {
-        if kv.key == "service.name" {
-            if let Some(ref val) = kv.value {
-                return any_value_to_string(val);
-            }
+        if kv.key == "service.name"
+            && let Some(ref val) = kv.value
+        {
+            return any_value_to_string(val);
         }
     }
     "unknown".to_string()
@@ -123,7 +123,7 @@ pub fn flatten_attrs(attrs: &[KeyValue]) -> serde_json::Value {
         let value = kv
             .value
             .as_ref()
-            .map(|v| any_value_to_string(v))
+            .map(any_value_to_string)
             .unwrap_or_default();
         map.insert(kv.key.clone(), serde_json::Value::String(value));
     }

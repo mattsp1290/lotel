@@ -94,10 +94,10 @@ pub fn stop_process(pid: u32, timeout: Duration) -> Result<()> {
 }
 
 pub fn cleanup_stale_state() -> Result<()> {
-    if let Some(state) = read_state()? {
-        if !is_pid_alive(state.pid) {
-            remove_state()?;
-        }
+    if let Some(state) = read_state()?
+        && !is_pid_alive(state.pid)
+    {
+        remove_state()?;
     }
     Ok(())
 }

@@ -4,12 +4,15 @@ mod time;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
 #[derive(Parser)]
-#[command(name = "lotel", about = "Local OpenTelemetry — manage a collector and query telemetry")]
+#[command(
+    name = "lotel",
+    about = "Local OpenTelemetry — manage a collector and query telemetry"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -153,8 +156,7 @@ fn cmd_start(wait: bool) -> Result<()> {
 
     let config_path =
         lotel_collector::config::resolve_config_path().map_err(|e| anyhow::anyhow!("{e}"))?;
-    let data_path =
-        lotel_collector::config::data_path().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let data_path = lotel_collector::config::data_path().map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let pid = daemon::spawn_collector(&config_path, &data_path)?;
 
@@ -220,11 +222,7 @@ fn cmd_status() -> Result<()> {
     match state {
         Some(state) => {
             let running = daemon::is_pid_alive(state.pid);
-            let healthy = if running {
-                check_health_sync()
-            } else {
-                false
-            };
+            let healthy = if running { check_health_sync() } else { false };
             print_json(&serde_json::json!({
                 "running": running,
                 "healthy": healthy,
@@ -267,7 +265,7 @@ fn cmd_health() -> Result<()> {
     Ok(())
 }
 
-fn cmd_run_collector(config: &PathBuf) -> Result<()> {
+fn cmd_run_collector(config: &std::path::Path) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let collector = lotel_collector::Collector::from_config_file(config)

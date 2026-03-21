@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -14,7 +14,10 @@ pub struct HealthCheckExtension {
 }
 
 impl HealthCheckExtension {
-    pub async fn run(self, cancel: CancellationToken) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run(
+        self,
+        cancel: CancellationToken,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let app = axum::Router::new()
             .route("/", get(handle_health))
             .with_state(self.ready);

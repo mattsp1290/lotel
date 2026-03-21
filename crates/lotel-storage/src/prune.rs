@@ -46,8 +46,7 @@ pub fn prune(
             .with_context(|| format!("counting {signal} for prune"))?;
 
         if !dry_run && count > 0 {
-            let mut delete_query =
-                format!("DELETE FROM {signal} WHERE {time_col} < ?");
+            let mut delete_query = format!("DELETE FROM {signal} WHERE {time_col} < ?");
             let mut del_params: Vec<Box<dyn duckdb::types::ToSql>> = Vec::new();
             del_params.push(Box::new(cutoff));
 
@@ -102,7 +101,8 @@ mod tests {
     #[test]
     fn dry_run_does_not_delete() {
         let conn = setup_with_data();
-        let cutoff = NaiveDateTime::parse_from_str("2024-06-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let cutoff =
+            NaiveDateTime::parse_from_str("2024-06-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let reports = prune(&conn, cutoff, None, true).unwrap();
 
         assert_eq!(reports.len(), 3);
@@ -110,21 +110,26 @@ mod tests {
         assert_eq!(reports[0].deleted, 1); // The old trace.
 
         // Verify nothing was actually deleted.
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, 2);
     }
 
     #[test]
     fn prune_deletes_old_data() {
         let conn = setup_with_data();
-        let cutoff = NaiveDateTime::parse_from_str("2024-06-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let cutoff =
+            NaiveDateTime::parse_from_str("2024-06-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let reports = prune(&conn, cutoff, None, false).unwrap();
 
         assert_eq!(reports[0].deleted, 1); // Old trace deleted.
         assert_eq!(reports[1].deleted, 1); // Old metric deleted.
         assert_eq!(reports[2].deleted, 1); // Old log deleted.
 
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, 1); // Only the new trace remains.
     }
 
@@ -137,13 +142,20 @@ mod tests {
             [],
         ).unwrap();
 
-        let cutoff = NaiveDateTime::parse_from_str("2024-06-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let cutoff =
+            NaiveDateTime::parse_from_str("2024-06-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let reports = prune(&conn, cutoff, Some("svc-a"), false).unwrap();
 
         assert_eq!(reports[0].deleted, 1); // Only svc-a trace deleted.
 
         // svc-b trace should still exist.
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM traces WHERE service_name = 'svc-b'", [], |row| row.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM traces WHERE service_name = 'svc-b'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
     }
 }

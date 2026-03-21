@@ -9,8 +9,14 @@ use serde_json::Value;
 /// Ingest all JSONL files from data_path into the database.
 pub fn ingest_all(conn: &Connection, data_path: &Path) -> Result<()> {
     for (signal, ingest_fn) in [
-        ("traces", ingest_traces as fn(&Connection, &Path) -> Result<()>),
-        ("metrics", ingest_metrics as fn(&Connection, &Path) -> Result<()>),
+        (
+            "traces",
+            ingest_traces as fn(&Connection, &Path) -> Result<()>,
+        ),
+        (
+            "metrics",
+            ingest_metrics as fn(&Connection, &Path) -> Result<()>,
+        ),
         ("logs", ingest_logs as fn(&Connection, &Path) -> Result<()>),
     ] {
         let file = data_path.join(signal).join(format!("{signal}.jsonl"));
@@ -97,10 +103,10 @@ impl OtlpValue {
 
 fn extract_service_name(attrs: &[OtlpAttr]) -> String {
     for attr in attrs {
-        if attr.key == "service.name" {
-            if let Some(v) = &attr.value {
-                return v.as_string();
-            }
+        if attr.key == "service.name"
+            && let Some(v) = &attr.value
+        {
+            return v.as_string();
         }
     }
     "unknown".to_string()
@@ -174,6 +180,32 @@ struct SpanStatus {
     code: Option<i32>,
 }
 
+/// Ingest a single JSON line of trace data. Returns the number of spans ingested.
+pub(crate) fn ingest_trace_line(tx: &Transaction, line: &str) -> Result<usize> {
+    let batch: TraceBatch = match serde_json::from_str(line) {
+        Ok(b) => b,
+        Err(_) => return Ok(0),
+    };
+
+    let mut count = 0;
+    for rs in &batch.resource_spans {
+        let svc_name = rs
+            .resource
+            .as_ref()
+            .and_then(|r| r.attributes.as_ref())
+            .map(|a| extract_service_name(a))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        for ss in &rs.scope_spans {
+            for span in &ss.spans {
+                insert_span(tx, span, &svc_name)?;
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
 fn ingest_traces(conn: &Connection, file: &Path) -> Result<()> {
     let f = std::fs::File::open(file)?;
     let reader = BufReader::with_capacity(1024 * 1024, f);
@@ -185,26 +217,7 @@ fn ingest_traces(conn: &Connection, file: &Path) -> Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-
-        let batch: TraceBatch = match serde_json::from_str(&line) {
-            Ok(b) => b,
-            Err(_) => continue, // Skip malformed lines.
-        };
-
-        for rs in &batch.resource_spans {
-            let svc_name = rs
-                .resource
-                .as_ref()
-                .and_then(|r| r.attributes.as_ref())
-                .map(|a| extract_service_name(a))
-                .unwrap_or_else(|| "unknown".to_string());
-
-            for ss in &rs.scope_spans {
-                for span in &ss.spans {
-                    insert_span(&tx, span, &svc_name)?;
-                }
-            }
-        }
+        ingest_trace_line(&tx, &line)?;
     }
 
     tx.commit()?;
@@ -409,6 +422,51 @@ fn extract_data_points(m: &MetricJson) -> Vec<MetricPoint> {
     points
 }
 
+/// Ingest a single JSON line of metric data. Returns the number of data points ingested.
+pub(crate) fn ingest_metric_line(tx: &Transaction, line: &str) -> Result<usize> {
+    let batch: MetricBatch = match serde_json::from_str(line) {
+        Ok(b) => b,
+        Err(_) => return Ok(0),
+    };
+
+    let mut count = 0;
+    for rm in &batch.resource_metrics {
+        let svc_name = rm
+            .resource
+            .as_ref()
+            .and_then(|r| r.attributes.as_ref())
+            .map(|a| extract_service_name(a))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        for sm in &rm.scope_metrics {
+            for m in &sm.metrics {
+                for dp in extract_data_points(m) {
+                    let attrs_str = serde_json::to_string(&dp.attributes)?;
+                    let date_str = dp.timestamp.map(|t| t.format("%Y-%m-%d").to_string());
+
+                    tx.execute(
+                        "INSERT INTO metrics (metric_name, metric_type, value, timestamp, service_name, aggregation_temporality, is_monotonic, unit, attributes, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        duckdb::params![
+                            m.name,
+                            dp.metric_type,
+                            dp.value,
+                            dp.timestamp,
+                            svc_name,
+                            dp.temporality,
+                            dp.monotonic,
+                            m.unit.as_deref(),
+                            attrs_str,
+                            date_str.as_deref(),
+                        ],
+                    )?;
+                    count += 1;
+                }
+            }
+        }
+    }
+    Ok(count)
+}
+
 fn ingest_metrics(conn: &Connection, file: &Path) -> Result<()> {
     let f = std::fs::File::open(file)?;
     let reader = BufReader::with_capacity(1024 * 1024, f);
@@ -420,45 +478,7 @@ fn ingest_metrics(conn: &Connection, file: &Path) -> Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-
-        let batch: MetricBatch = match serde_json::from_str(&line) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-
-        for rm in &batch.resource_metrics {
-            let svc_name = rm
-                .resource
-                .as_ref()
-                .and_then(|r| r.attributes.as_ref())
-                .map(|a| extract_service_name(a))
-                .unwrap_or_else(|| "unknown".to_string());
-
-            for sm in &rm.scope_metrics {
-                for m in &sm.metrics {
-                    for dp in extract_data_points(m) {
-                        let attrs_str = serde_json::to_string(&dp.attributes)?;
-                        let date_str = dp.timestamp.map(|t| t.format("%Y-%m-%d").to_string());
-
-                        tx.execute(
-                            "INSERT INTO metrics (metric_name, metric_type, value, timestamp, service_name, aggregation_temporality, is_monotonic, unit, attributes, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            duckdb::params![
-                                m.name,
-                                dp.metric_type,
-                                dp.value,
-                                dp.timestamp,
-                                svc_name,
-                                dp.temporality,
-                                dp.monotonic,
-                                m.unit.as_deref(),
-                                attrs_str,
-                                date_str.as_deref(),
-                            ],
-                        )?;
-                    }
-                }
-            }
-        }
+        ingest_metric_line(&tx, &line)?;
     }
 
     tx.commit()?;
@@ -506,6 +526,57 @@ struct LogRecordJson {
     attributes: Option<Vec<OtlpAttr>>,
 }
 
+/// Ingest a single JSON line of log data. Returns the number of log records ingested.
+pub(crate) fn ingest_log_line(tx: &Transaction, line: &str) -> Result<usize> {
+    let batch: LogBatch = match serde_json::from_str(line) {
+        Ok(b) => b,
+        Err(_) => return Ok(0),
+    };
+
+    let mut count = 0;
+    for rl in &batch.resource_logs {
+        let svc_name = rl
+            .resource
+            .as_ref()
+            .and_then(|r| r.attributes.as_ref())
+            .map(|a| extract_service_name(a))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        for sl in &rl.scope_logs {
+            for lr in &sl.log_records {
+                let ts = lr.time_unix_nano.to_datetime();
+                let attrs = lr
+                    .attributes
+                    .as_ref()
+                    .map(|a| flatten_attrs(a))
+                    .unwrap_or(Value::Object(serde_json::Map::new()));
+                let attrs_str = serde_json::to_string(&attrs)?;
+                let body_str = lr.body.as_ref().map(|b| b.as_string());
+                let date_str = ts.map(|t| t.format("%Y-%m-%d").to_string());
+                let trace_id = lr.trace_id.as_deref().filter(|s| !s.is_empty());
+                let span_id = lr.span_id.as_deref().filter(|s| !s.is_empty());
+
+                tx.execute(
+                    "INSERT INTO logs (timestamp, severity, severity_number, body, service_name, trace_id, span_id, attributes, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    duckdb::params![
+                        ts,
+                        lr.severity_text.as_deref(),
+                        lr.severity_number,
+                        body_str.as_deref(),
+                        svc_name,
+                        trace_id,
+                        span_id,
+                        attrs_str,
+                        date_str.as_deref(),
+                    ],
+                )?;
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
 fn ingest_logs(conn: &Connection, file: &Path) -> Result<()> {
     let f = std::fs::File::open(file)?;
     let reader = BufReader::with_capacity(1024 * 1024, f);
@@ -517,51 +588,7 @@ fn ingest_logs(conn: &Connection, file: &Path) -> Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-
-        let batch: LogBatch = match serde_json::from_str(&line) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-
-        for rl in &batch.resource_logs {
-            let svc_name = rl
-                .resource
-                .as_ref()
-                .and_then(|r| r.attributes.as_ref())
-                .map(|a| extract_service_name(a))
-                .unwrap_or_else(|| "unknown".to_string());
-
-            for sl in &rl.scope_logs {
-                for lr in &sl.log_records {
-                    let ts = lr.time_unix_nano.to_datetime();
-                    let attrs = lr
-                        .attributes
-                        .as_ref()
-                        .map(|a| flatten_attrs(a))
-                        .unwrap_or(Value::Object(serde_json::Map::new()));
-                    let attrs_str = serde_json::to_string(&attrs)?;
-                    let body_str = lr.body.as_ref().map(|b| b.as_string());
-                    let date_str = ts.map(|t| t.format("%Y-%m-%d").to_string());
-                    let trace_id = lr.trace_id.as_deref().filter(|s| !s.is_empty());
-                    let span_id = lr.span_id.as_deref().filter(|s| !s.is_empty());
-
-                    tx.execute(
-                        "INSERT INTO logs (timestamp, severity, severity_number, body, service_name, trace_id, span_id, attributes, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        duckdb::params![
-                            ts,
-                            lr.severity_text.as_deref(),
-                            lr.severity_number,
-                            body_str.as_deref(),
-                            svc_name,
-                            trace_id,
-                            span_id,
-                            attrs_str,
-                            date_str.as_deref(),
-                        ],
-                    )?;
-                }
-            }
-        }
+        ingest_log_line(&tx, &line)?;
     }
 
     tx.commit()?;
@@ -572,7 +599,6 @@ fn ingest_logs(conn: &Connection, file: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db;
-    use std::io::Write;
 
     fn setup_db() -> Connection {
         db::open_in_memory().unwrap()

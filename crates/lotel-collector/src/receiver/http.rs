@@ -1,9 +1,9 @@
 use std::net::SocketAddr;
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
-use axum::Json;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;

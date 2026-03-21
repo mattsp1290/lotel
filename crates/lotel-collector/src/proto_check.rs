@@ -94,13 +94,17 @@ mod tests {
         // These assertions just verify the types are usable — we cannot
         // instantiate servers without an implementation, but the trait
         // being importable is what we need to confirm.
-        fn _assert_trace_server<S: opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceService>() {
+        fn _assert_trace_server<
+            S: opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceService,
+        >() {
             let _ = TraceServiceServer::<S>::new;
         }
-        fn _assert_metrics_server<S: opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsService>() {
+        fn _assert_metrics_server<S: opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsService>(){
             let _ = MetricsServiceServer::<S>::new;
         }
-        fn _assert_logs_server<S: opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsService>() {
+        fn _assert_logs_server<
+            S: opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsService,
+        >() {
             let _ = LogsServiceServer::<S>::new;
         }
     }
@@ -113,8 +117,7 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string(&span).expect("serialize span to JSON");
-        let deserialized: Span =
-            serde_json::from_str(&json).expect("deserialize span from JSON");
+        let deserialized: Span = serde_json::from_str(&json).expect("deserialize span from JSON");
         assert_eq!(deserialized.name, "test-span");
     }
 }

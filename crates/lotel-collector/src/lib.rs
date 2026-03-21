@@ -3,6 +3,7 @@
 pub mod config;
 pub mod exporter;
 pub mod extension;
+pub mod ingestion;
 pub mod model;
 pub mod pipeline;
 pub mod processor;
@@ -62,10 +63,7 @@ impl Collector {
 
     /// Start the collector pipeline.
     pub fn start(self) -> Result<CollectorHandle, Box<dyn std::error::Error>> {
-        let health_endpoint = format!(
-            "http://{}",
-            self.config.extensions.health_check.endpoint
-        );
+        let health_endpoint = format!("http://{}", self.config.extensions.health_check.endpoint);
         let pipeline = Pipeline::run(&self.config)?;
         Ok(CollectorHandle {
             pipeline,

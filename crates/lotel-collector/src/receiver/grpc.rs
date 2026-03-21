@@ -1,16 +1,16 @@
 use std::net::SocketAddr;
 
 use opentelemetry_proto::tonic::collector::logs::v1::{
-    logs_service_server::{LogsService, LogsServiceServer},
     ExportLogsServiceRequest, ExportLogsServiceResponse,
+    logs_service_server::{LogsService, LogsServiceServer},
 };
 use opentelemetry_proto::tonic::collector::metrics::v1::{
-    metrics_service_server::{MetricsService, MetricsServiceServer},
     ExportMetricsServiceRequest, ExportMetricsServiceResponse,
+    metrics_service_server::{MetricsService, MetricsServiceServer},
 };
 use opentelemetry_proto::tonic::collector::trace::v1::{
-    trace_service_server::{TraceService, TraceServiceServer},
     ExportTraceServiceRequest, ExportTraceServiceResponse,
+    trace_service_server::{TraceService, TraceServiceServer},
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

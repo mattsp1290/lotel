@@ -79,103 +79,115 @@ pub struct MetricAggregation {
 
 pub fn query_traces(conn: &Connection, opts: &QueryOptions) -> Result<Vec<TraceResult>> {
     let mut query = String::from(
-        "SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR) FROM traces WHERE 1=1"
+        "SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR) FROM traces WHERE 1=1",
     );
     let mut params: Vec<Box<dyn duckdb::types::ToSql>> = Vec::new();
 
     append_where(&mut query, &mut params, opts, "start_time");
 
     query.push_str(" ORDER BY start_time ASC");
-    if let Some(limit) = opts.limit {
-        if limit > 0 {
-            query.push_str(&format!(" LIMIT {limit}"));
-        }
+    if let Some(limit) = opts.limit
+        && limit > 0
+    {
+        query.push_str(&format!(" LIMIT {limit}"));
     }
 
     let mut stmt = conn.prepare(&query)?;
     let param_refs: Vec<&dyn duckdb::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt.query_map(param_refs.as_slice(), |row| {
-        Ok(TraceResult {
-            trace_id: row.get(0)?,
-            span_id: row.get(1)?,
-            parent_span_id: row.get(2)?,
-            name: row.get(3)?,
-            kind: row.get(4)?,
-            start_time: row.get(5)?,
-            end_time: row.get(6)?,
-            duration_ns: row.get(7)?,
-            status_code: row.get(8)?,
-            service_name: row.get(9)?,
-            attributes: row.get::<_, Option<String>>(10)?.and_then(|s| serde_json::from_str(&s).ok()),
+    let rows = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            Ok(TraceResult {
+                trace_id: row.get(0)?,
+                span_id: row.get(1)?,
+                parent_span_id: row.get(2)?,
+                name: row.get(3)?,
+                kind: row.get(4)?,
+                start_time: row.get(5)?,
+                end_time: row.get(6)?,
+                duration_ns: row.get(7)?,
+                status_code: row.get(8)?,
+                service_name: row.get(9)?,
+                attributes: row
+                    .get::<_, Option<String>>(10)?
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+            })
         })
-    }).context("querying traces")?;
+        .context("querying traces")?;
 
     rows.map(|r| r.map_err(Into::into)).collect()
 }
 
 pub fn query_metrics(conn: &Connection, opts: &QueryOptions) -> Result<Vec<MetricResult>> {
     let mut query = String::from(
-        "SELECT metric_name, metric_type, value, timestamp, service_name, aggregation_temporality, is_monotonic, unit, CAST(attributes AS VARCHAR) FROM metrics WHERE 1=1"
+        "SELECT metric_name, metric_type, value, timestamp, service_name, aggregation_temporality, is_monotonic, unit, CAST(attributes AS VARCHAR) FROM metrics WHERE 1=1",
     );
     let mut params: Vec<Box<dyn duckdb::types::ToSql>> = Vec::new();
 
     append_where(&mut query, &mut params, opts, "timestamp");
 
     query.push_str(" ORDER BY timestamp ASC");
-    if let Some(limit) = opts.limit {
-        if limit > 0 {
-            query.push_str(&format!(" LIMIT {limit}"));
-        }
+    if let Some(limit) = opts.limit
+        && limit > 0
+    {
+        query.push_str(&format!(" LIMIT {limit}"));
     }
 
     let mut stmt = conn.prepare(&query)?;
     let param_refs: Vec<&dyn duckdb::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt.query_map(param_refs.as_slice(), |row| {
-        Ok(MetricResult {
-            metric_name: row.get(0)?,
-            metric_type: row.get(1)?,
-            value: row.get(2)?,
-            timestamp: row.get(3)?,
-            service_name: row.get(4)?,
-            aggregation_temporality: row.get(5)?,
-            is_monotonic: row.get(6)?,
-            unit: row.get(7)?,
-            attributes: row.get::<_, Option<String>>(8)?.and_then(|s| serde_json::from_str(&s).ok()),
+    let rows = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            Ok(MetricResult {
+                metric_name: row.get(0)?,
+                metric_type: row.get(1)?,
+                value: row.get(2)?,
+                timestamp: row.get(3)?,
+                service_name: row.get(4)?,
+                aggregation_temporality: row.get(5)?,
+                is_monotonic: row.get(6)?,
+                unit: row.get(7)?,
+                attributes: row
+                    .get::<_, Option<String>>(8)?
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+            })
         })
-    }).context("querying metrics")?;
+        .context("querying metrics")?;
 
     rows.map(|r| r.map_err(Into::into)).collect()
 }
 
 pub fn query_logs(conn: &Connection, opts: &QueryOptions) -> Result<Vec<LogResult>> {
     let mut query = String::from(
-        "SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR) FROM logs WHERE 1=1"
+        "SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR) FROM logs WHERE 1=1",
     );
     let mut params: Vec<Box<dyn duckdb::types::ToSql>> = Vec::new();
 
     append_where(&mut query, &mut params, opts, "timestamp");
 
     query.push_str(" ORDER BY timestamp ASC");
-    if let Some(limit) = opts.limit {
-        if limit > 0 {
-            query.push_str(&format!(" LIMIT {limit}"));
-        }
+    if let Some(limit) = opts.limit
+        && limit > 0
+    {
+        query.push_str(&format!(" LIMIT {limit}"));
     }
 
     let mut stmt = conn.prepare(&query)?;
     let param_refs: Vec<&dyn duckdb::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt.query_map(param_refs.as_slice(), |row| {
-        Ok(LogResult {
-            timestamp: row.get(0)?,
-            severity: row.get(1)?,
-            severity_number: row.get(2)?,
-            body: row.get(3)?,
-            service_name: row.get(4)?,
-            trace_id: row.get(5)?,
-            span_id: row.get(6)?,
-            attributes: row.get::<_, Option<String>>(7)?.and_then(|s| serde_json::from_str(&s).ok()),
+    let rows = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            Ok(LogResult {
+                timestamp: row.get(0)?,
+                severity: row.get(1)?,
+                severity_number: row.get(2)?,
+                body: row.get(3)?,
+                service_name: row.get(4)?,
+                trace_id: row.get(5)?,
+                span_id: row.get(6)?,
+                attributes: row
+                    .get::<_, Option<String>>(7)?
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+            })
         })
-    }).context("querying logs")?;
+        .context("querying logs")?;
 
     rows.map(|r| r.map_err(Into::into)).collect()
 }
@@ -186,7 +198,7 @@ pub fn aggregate_metrics(
     metric_name: &str,
 ) -> Result<MetricAggregation> {
     let mut query = String::from(
-        "SELECT COUNT(*), AVG(value), MIN(value), MAX(value) FROM metrics WHERE metric_name = ?"
+        "SELECT COUNT(*), AVG(value), MIN(value), MAX(value) FROM metrics WHERE metric_name = ?",
     );
     let mut params: Vec<Box<dyn duckdb::types::ToSql>> = Vec::new();
     params.push(Box::new(metric_name.to_string()));

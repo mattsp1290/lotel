@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{Duration, NaiveDateTime, Utc};
 
 /// Parse a time string as RFC 3339 or a relative duration (e.g. "1h", "24h", "7d").

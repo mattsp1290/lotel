@@ -41,7 +41,10 @@ impl FileExporter {
         Ok(())
     }
 
-    fn write_signal(&self, data: &SignalData) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn write_signal(
+        &self,
+        data: &SignalData,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match data {
             SignalData::Traces(req) => self.append_json(&self.traces_path, req),
             SignalData::Metrics(req) => self.append_json(&self.metrics_path, req),
@@ -57,10 +60,7 @@ impl FileExporter {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
         let mut writer = BufWriter::new(file);
         serde_json::to_writer(&mut writer, value)?;
         writeln!(writer)?;
@@ -131,8 +131,7 @@ mod tests {
             let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
             // Proto serde may use either snake_case or camelCase.
             assert!(
-                parsed.get("resource_spans").is_some()
-                    || parsed.get("resourceSpans").is_some(),
+                parsed.get("resource_spans").is_some() || parsed.get("resourceSpans").is_some(),
                 "expected resource_spans or resourceSpans in: {line}"
             );
         }

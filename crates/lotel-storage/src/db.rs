@@ -135,9 +135,18 @@ mod tests {
         assert_eq!(
             cols,
             vec![
-                "trace_id", "span_id", "parent_span_id", "name", "kind",
-                "start_time", "end_time", "duration_ns", "status_code",
-                "service_name", "attributes", "date"
+                "trace_id",
+                "span_id",
+                "parent_span_id",
+                "name",
+                "kind",
+                "start_time",
+                "end_time",
+                "duration_ns",
+                "status_code",
+                "service_name",
+                "attributes",
+                "date"
             ]
         );
     }

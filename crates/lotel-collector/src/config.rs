@@ -56,6 +56,10 @@ extensions:
   health_check:
     endpoint: 0.0.0.0:13133
 
+ingestion:
+  interval: 2m
+  enabled: true
+
 service:
   extensions: [health_check]
   pipelines:
@@ -88,6 +92,26 @@ pub struct CollectorConfig {
     pub exporters: HashMap<String, FileExporter>,
     pub extensions: Extensions,
     pub service: Service,
+    #[serde(default)]
+    pub ingestion: Option<IngestionConfig>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct IngestionConfig {
+    /// How often to run ingestion (e.g., "2m", "5m", "30s").
+    #[serde(default = "default_ingestion_interval")]
+    pub interval: String,
+    /// Enable or disable periodic ingestion.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_ingestion_interval() -> String {
+    "2m".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -195,10 +219,7 @@ pub fn resolve_config_path() -> Result<PathBuf, ConfigError> {
     let data = lotel_dir.join("data");
     for sub in &["traces", "metrics", "logs"] {
         let p = data.join(sub);
-        fs::create_dir_all(&p).map_err(|e| ConfigError::CreateDir {
-            path: p,
-            source: e,
-        })?;
+        fs::create_dir_all(&p).map_err(|e| ConfigError::CreateDir { path: p, source: e })?;
     }
 
     let config_path = lotel_dir.join(DEFAULT_CONFIG_NAME);
@@ -222,6 +243,31 @@ pub fn load_config() -> Result<CollectorConfig, ConfigError> {
         source: e,
     })?;
     parse_config(&content)
+}
+
+/// Parse a duration string supporting "Nh", "Nm", "Ns", "Nms".
+pub fn parse_duration(s: &str) -> std::time::Duration {
+    if let Some(ms) = s.strip_suffix("ms")
+        && let Ok(n) = ms.parse::<u64>()
+    {
+        return std::time::Duration::from_millis(n);
+    }
+    if let Some(hours) = s.strip_suffix('h')
+        && let Ok(n) = hours.parse::<f64>()
+    {
+        return std::time::Duration::from_secs_f64(n * 3600.0);
+    }
+    if let Some(mins) = s.strip_suffix('m')
+        && let Ok(n) = mins.parse::<f64>()
+    {
+        return std::time::Duration::from_secs_f64(n * 60.0);
+    }
+    if let Some(secs) = s.strip_suffix('s')
+        && let Ok(n) = secs.parse::<f64>()
+    {
+        return std::time::Duration::from_secs_f64(n);
+    }
+    std::time::Duration::from_secs(120) // Default 2 minutes.
 }
 
 #[cfg(test)]
@@ -248,18 +294,12 @@ mod tests {
         assert_eq!(traces_exporter.format, "json");
 
         let metrics_exporter = config.exporters.get("file/metrics").unwrap();
-        assert_eq!(
-            metrics_exporter.path,
-            "~/.lotel/data/metrics/metrics.jsonl"
-        );
+        assert_eq!(metrics_exporter.path, "~/.lotel/data/metrics/metrics.jsonl");
 
         let logs_exporter = config.exporters.get("file/logs").unwrap();
         assert_eq!(logs_exporter.path, "~/.lotel/data/logs/logs.jsonl");
 
-        assert_eq!(
-            config.extensions.health_check.endpoint,
-            "0.0.0.0:13133"
-        );
+        assert_eq!(config.extensions.health_check.endpoint, "0.0.0.0:13133");
 
         assert_eq!(config.service.extensions, vec!["health_check"]);
         assert_eq!(config.service.pipelines.len(), 3);
@@ -268,6 +308,76 @@ mod tests {
         assert_eq!(traces_pipeline.receivers, vec!["otlp"]);
         assert_eq!(traces_pipeline.processors, vec!["batch"]);
         assert_eq!(traces_pipeline.exporters, vec!["file/traces"]);
+
+        let ingestion = config.ingestion.as_ref().unwrap();
+        assert_eq!(ingestion.interval, "2m");
+        assert!(ingestion.enabled);
+    }
+
+    #[test]
+    fn parse_config_without_ingestion() {
+        let yaml = r#"
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+exporters:
+  file/traces:
+    path: /tmp/traces.jsonl
+    format: json
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [file/traces]
+"#;
+        let config = parse_config(yaml).expect("should parse without ingestion");
+        assert!(config.ingestion.is_none());
+    }
+
+    #[test]
+    fn parse_duration_minutes() {
+        assert_eq!(parse_duration("2m"), std::time::Duration::from_secs(120));
+        assert_eq!(parse_duration("5m"), std::time::Duration::from_secs(300));
+    }
+
+    #[test]
+    fn parse_duration_seconds() {
+        assert_eq!(parse_duration("30s"), std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn parse_duration_millis() {
+        assert_eq!(
+            parse_duration("500ms"),
+            std::time::Duration::from_millis(500)
+        );
+    }
+
+    #[test]
+    fn parse_duration_hours() {
+        assert_eq!(parse_duration("1h"), std::time::Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn parse_duration_fallback() {
+        assert_eq!(
+            parse_duration("invalid"),
+            std::time::Duration::from_secs(120)
+        );
     }
 
     #[test]
