@@ -124,26 +124,14 @@ fn main() -> Result<()> {
         Command::Stop => cmd_stop()?,
         Command::Status => cmd_status()?,
         Command::Health => cmd_health()?,
-        Command::Ingest => {
-            eprintln!("ingest: not yet implemented");
-        }
-        Command::Query { subcommand } => match subcommand {
-            QueryCommand::Traces { .. } => {
-                print_json(&serde_json::Value::Array(vec![]));
-            }
-            QueryCommand::Metrics { .. } => {
-                print_json(&serde_json::Value::Array(vec![]));
-            }
-            QueryCommand::Logs { .. } => {
-                print_json(&serde_json::Value::Array(vec![]));
-            }
-            QueryCommand::Aggregate { .. } => {
-                print_json(&serde_json::json!({}));
-            }
-        },
-        Command::Prune { .. } => {
-            eprintln!("prune: not yet implemented");
-        }
+        Command::Ingest => cmd_ingest()?,
+        Command::Query { subcommand } => cmd_query(subcommand)?,
+        Command::Prune {
+            older_than,
+            service,
+            dry_run,
+            all,
+        } => cmd_prune(older_than, service, dry_run, all)?,
         Command::RunCollector { config, data: _ } => {
             cmd_run_collector(&config)?;
         }
@@ -291,6 +279,109 @@ fn cmd_run_collector(config: &PathBuf) -> Result<()> {
         eprintln!("Shutting down collector...");
         handle.shutdown().await;
         Ok(())
+    })
+}
+
+fn cmd_ingest() -> Result<()> {
+    let data_path = lotel_collector::config::data_path().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let conn = lotel_storage::default_db()?;
+    lotel_storage::ingest_all(&conn, &data_path)?;
+    eprintln!("Ingestion complete.");
+    Ok(())
+}
+
+fn cmd_query(subcommand: QueryCommand) -> Result<()> {
+    let conn = lotel_storage::default_db()?;
+
+    match subcommand {
+        QueryCommand::Traces {
+            service,
+            since,
+            until,
+            limit,
+        } => {
+            let opts = build_query_opts(service, since, until, limit)?;
+            let results = lotel_storage::query_traces(&conn, &opts)?;
+            print_json(&results);
+        }
+        QueryCommand::Metrics {
+            service,
+            since,
+            until,
+            limit,
+        } => {
+            let opts = build_query_opts(service, since, until, limit)?;
+            let results = lotel_storage::query_metrics(&conn, &opts)?;
+            print_json(&results);
+        }
+        QueryCommand::Logs {
+            service,
+            since,
+            until,
+            limit,
+        } => {
+            let opts = build_query_opts(service, since, until, limit)?;
+            let results = lotel_storage::query_logs(&conn, &opts)?;
+            print_json(&results);
+        }
+        QueryCommand::Aggregate {
+            metric,
+            service,
+            since,
+            until,
+        } => {
+            let opts = build_query_opts(service, since, until, None)?;
+            let result = lotel_storage::aggregate_metrics(&conn, &opts, &metric)?;
+            print_json(&result);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_prune(
+    older_than: Option<String>,
+    service: Option<String>,
+    dry_run: bool,
+    all: bool,
+) -> Result<()> {
+    if all && older_than.is_some() {
+        bail!("--all and --older-than are mutually exclusive");
+    }
+    if !all && older_than.is_none() {
+        bail!("--older-than or --all is required (e.g., '7d', '24h')");
+    }
+
+    let cutoff = if all {
+        // Future cutoff catches everything.
+        chrono::Utc::now().naive_utc() + chrono::Duration::hours(1)
+    } else {
+        let dur = time::parse_duration(older_than.as_deref().unwrap())?;
+        chrono::Utc::now().naive_utc() - dur
+    };
+
+    let conn = lotel_storage::default_db()?;
+    let reports = lotel_storage::prune(&conn, cutoff, service.as_deref(), dry_run)?;
+
+    if dry_run {
+        eprintln!("Dry run — no data was deleted.");
+    }
+    print_json(&reports);
+    Ok(())
+}
+
+fn build_query_opts(
+    service: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    limit: Option<usize>,
+) -> Result<lotel_storage::QueryOptions> {
+    let since_dt = since.map(|s| time::parse_time(&s)).transpose()?;
+    let until_dt = until.map(|s| time::parse_time(&s)).transpose()?;
+    Ok(lotel_storage::QueryOptions {
+        service,
+        since: since_dt,
+        until: until_dt,
+        limit,
     })
 }
 
