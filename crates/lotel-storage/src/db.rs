@@ -31,6 +31,13 @@ pub fn open_db(path: &Path) -> Result<Connection, StorageError> {
     Ok(conn)
 }
 
+/// Open an in-memory DuckDB with migrations applied (for testing).
+pub fn open_in_memory() -> Result<Connection, StorageError> {
+    let conn = Connection::open_in_memory()?;
+    migrate(&conn)?;
+    Ok(conn)
+}
+
 /// Open the default DuckDB at ~/.lotel/data/lotel.db.
 pub fn default_db() -> Result<Connection, StorageError> {
     let home = dirs::home_dir().ok_or(StorageError::NoHome)?;
