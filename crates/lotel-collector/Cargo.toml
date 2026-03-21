@@ -21,4 +21,5 @@ tokio-stream = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
+lotel-storage = { path = "../lotel-storage" }
 tempfile = "3"

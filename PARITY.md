@@ -10,19 +10,35 @@ Tracking parity between the Go implementation and the Rust rewrite.
 |-----------|-----------|------------|--------|
 | Config/YAML parsing | `internal/config/config.go` | `lotel-collector::config` | Done |
 | DuckDB schema/migration | `internal/storage/db.go` | `lotel-storage::db` | Done |
-| CLI scaffold | `cmd/lotel/main.go` | `lotel-cli` | Done (stubs) |
-| OTLP proto types | (go-duckdb + otlp libs) | `opentelemetry-proto` | Validated |
-| OTLP gRPC receiver | `internal/collector/` | `lotel-collector` | Not started |
-| OTLP HTTP receiver | `internal/collector/` | `lotel-collector` | Not started |
-| JSONL file exporter | `internal/collector/` | `lotel-collector` | Not started |
-| Health check extension | `internal/collector/` | `lotel-collector` | Not started |
-| Traces ingestion | `internal/storage/ingest.go` | `lotel-storage` | Not started |
-| Metrics ingestion | `internal/storage/ingest.go` | `lotel-storage` | Not started |
-| Logs ingestion | `internal/storage/ingest.go` | `lotel-storage` | Not started |
-| Query interface | `internal/storage/query.go` | `lotel-storage` | Not started |
-| Data pruning | `internal/storage/prune.go` | `lotel-storage` | Not started |
-| Collector lifecycle | `internal/collector/` | `lotel-collector` | Not started |
-| CI configuration | - | - | Not started |
+| CLI scaffold + commands | `cmd/lotel/main.go` | `lotel-cli` | Done |
+| OTLP proto types | (otlp libs) | `opentelemetry-proto` v0.31 | Validated |
+| OTLP gRPC receiver | `internal/collector/` | `lotel-collector::receiver::grpc` | Done (tonic) |
+| OTLP HTTP receiver | `internal/collector/` | `lotel-collector::receiver::http` | Done (axum) |
+| Batch processor | - | `lotel-collector::processor::batch` | Done |
+| JSONL file exporter | `internal/collector/` | `lotel-collector::exporter::file` | Done |
+| Health check extension | `internal/collector/` | `lotel-collector::extension::health` | Done |
+| Pipeline orchestration | `internal/collector/` | `lotel-collector::pipeline` | Done |
+| Public collector API | - | `lotel-collector::{Collector,CollectorHandle}` | Done |
+| Internal data model | `internal/storage/ingest.go` | `lotel-collector::model` | Done |
+| Traces ingestion | `internal/storage/ingest.go` | `lotel-storage::ingest` | Done |
+| Metrics ingestion | `internal/storage/ingest.go` | `lotel-storage::ingest` | Done |
+| Logs ingestion | `internal/storage/ingest.go` | `lotel-storage::ingest` | Done |
+| Query interface | `internal/storage/query.go` | `lotel-storage::query` | Done |
+| Metric aggregation | `internal/storage/query.go` | `lotel-storage::query` | Done |
+| Data pruning | `internal/storage/prune.go` | `lotel-storage::prune` | Done |
+| Collector lifecycle | `internal/collector/` | `lotel-cli::daemon` | Done |
+| CI configuration | - | `.github/workflows/rust.yml` | Done |
+
+## Features Not Implemented (Out of Scope)
+
+| Feature | Reason |
+|---------|--------|
+| Memory limiter processor | Not needed for local dev workloads |
+| Debug exporter | Out of scope for local use |
+| Other receivers (Jaeger, Zipkin) | Out of scope — OTLP only |
+| Other exporters (OTLP, Jaeger) | File exporter covers local dev needs |
+| TLS for gRPC/HTTP | Not needed for localhost |
+| Load balancing/sharding | Single-host scope |
 
 ## Proto Type Validation
 

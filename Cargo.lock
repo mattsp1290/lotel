@@ -1401,6 +1401,7 @@ dependencies = [
  "axum",
  "chrono",
  "dirs",
+ "lotel-storage",
  "opentelemetry-proto",
  "prost",
  "reqwest",
@@ -1426,6 +1427,7 @@ dependencies = [
  "duckdb",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 

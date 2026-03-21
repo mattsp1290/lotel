@@ -63,9 +63,13 @@ struct OtlpAttr {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OtlpValue {
+    #[serde(alias = "string_value")]
     string_value: Option<String>,
+    #[serde(alias = "int_value")]
     int_value: Option<Value>,
+    #[serde(alias = "bool_value")]
     bool_value: Option<bool>,
+    #[serde(alias = "double_value")]
     double_value: Option<f64>,
 }
 
@@ -117,9 +121,13 @@ fn flatten_attrs(attrs: &[OtlpAttr]) -> serde_json::Value {
 
 // --- Traces ingestion ---
 
+// Note: we use rename_all="camelCase" to match standard OTLP JSON format (from Go OTel collector),
+// and add alias attributes for snake_case to also accept proto serde output (from Rust exporter).
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TraceBatch {
+    #[serde(alias = "resource_spans")]
     resource_spans: Vec<ResourceSpan>,
 }
 
@@ -127,6 +135,7 @@ struct TraceBatch {
 #[serde(rename_all = "camelCase")]
 struct ResourceSpan {
     resource: Option<Resource>,
+    #[serde(alias = "scope_spans")]
     scope_spans: Vec<ScopeSpan>,
 }
 
@@ -144,14 +153,17 @@ struct ScopeSpan {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SpanJson {
+    #[serde(alias = "trace_id")]
     trace_id: Option<String>,
+    #[serde(alias = "span_id")]
     span_id: Option<String>,
+    #[serde(alias = "parent_span_id")]
     parent_span_id: Option<String>,
     name: Option<String>,
     kind: Option<i32>,
-    #[serde(default)]
+    #[serde(default, alias = "start_time_unix_nano")]
     start_time_unix_nano: OtlpNano,
-    #[serde(default)]
+    #[serde(default, alias = "end_time_unix_nano")]
     end_time_unix_nano: OtlpNano,
     status: Option<SpanStatus>,
     attributes: Option<Vec<OtlpAttr>>,
@@ -239,6 +251,7 @@ fn insert_span(tx: &Transaction, span: &SpanJson, svc_name: &str) -> Result<()> 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MetricBatch {
+    #[serde(alias = "resource_metrics")]
     resource_metrics: Vec<ResourceMetric>,
 }
 
@@ -246,6 +259,7 @@ struct MetricBatch {
 #[serde(rename_all = "camelCase")]
 struct ResourceMetric {
     resource: Option<Resource>,
+    #[serde(alias = "scope_metrics")]
     scope_metrics: Vec<ScopeMetric>,
 }
 
@@ -268,21 +282,27 @@ struct MetricJson {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SumJson {
+    #[serde(alias = "data_points")]
     data_points: Vec<DataPointJson>,
+    #[serde(alias = "aggregation_temporality")]
     aggregation_temporality: Option<i32>,
+    #[serde(alias = "is_monotonic")]
     is_monotonic: Option<bool>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GaugeJson {
+    #[serde(alias = "data_points")]
     data_points: Vec<DataPointJson>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HistogramJson {
+    #[serde(alias = "data_points")]
     data_points: Vec<HistogramDPJson>,
+    #[serde(alias = "aggregation_temporality")]
     aggregation_temporality: Option<i32>,
 }
 
@@ -290,9 +310,11 @@ struct HistogramJson {
 #[serde(rename_all = "camelCase")]
 struct DataPointJson {
     attributes: Option<Vec<OtlpAttr>>,
-    #[serde(default)]
+    #[serde(default, alias = "time_unix_nano")]
     time_unix_nano: OtlpNano,
+    #[serde(alias = "as_int")]
     as_int: Option<Value>,
+    #[serde(alias = "as_double")]
     as_double: Option<f64>,
 }
 
@@ -316,7 +338,7 @@ impl DataPointJson {
 #[serde(rename_all = "camelCase")]
 struct HistogramDPJson {
     attributes: Option<Vec<OtlpAttr>>,
-    #[serde(default)]
+    #[serde(default, alias = "time_unix_nano")]
     time_unix_nano: OtlpNano,
     sum: Option<f64>,
 }
@@ -448,6 +470,7 @@ fn ingest_metrics(conn: &Connection, file: &Path) -> Result<()> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LogBatch {
+    #[serde(alias = "resource_logs")]
     resource_logs: Vec<ResourceLog>,
 }
 
@@ -455,24 +478,30 @@ struct LogBatch {
 #[serde(rename_all = "camelCase")]
 struct ResourceLog {
     resource: Option<Resource>,
+    #[serde(alias = "scope_logs")]
     scope_logs: Vec<ScopeLog>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ScopeLog {
+    #[serde(alias = "log_records")]
     log_records: Vec<LogRecordJson>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LogRecordJson {
-    #[serde(default)]
+    #[serde(default, alias = "time_unix_nano")]
     time_unix_nano: OtlpNano,
+    #[serde(alias = "severity_text")]
     severity_text: Option<String>,
+    #[serde(alias = "severity_number")]
     severity_number: Option<i32>,
     body: Option<OtlpValue>,
+    #[serde(alias = "trace_id")]
     trace_id: Option<String>,
+    #[serde(alias = "span_id")]
     span_id: Option<String>,
     attributes: Option<Vec<OtlpAttr>>,
 }
