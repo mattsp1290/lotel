@@ -35,7 +35,8 @@ Three workspace crates with a clear data pipeline:
 ```
 App (OTLP gRPC :4317 / HTTP :4318)
   → lotel-collector (receives, batches, writes JSONL to ~/.lotel/data/)
-  → lotel-cli ingest (reads JSONL, flattens proto records, inserts into DuckDB)
+    → ingestion task (periodically reads new JSONL, inserts into DuckDB)
+  → lotel-cli ingest (manual one-shot: reads JSONL, inserts into DuckDB)
   → lotel-cli query (SQL queries against DuckDB, returns JSON to stdout)
 ```
 
@@ -46,7 +47,9 @@ App (OTLP gRPC :4317 / HTTP :4318)
 
 **lotel-collector** (`crates/lotel-collector/src/`) — OTLP receiver and pipeline
 - `config.rs` — YAML config parsing, embedded default config, path resolution
-- `pipeline.rs` — Orchestrates receivers → batch processor → file exporter via tokio channels and CancellationToken
+- `pipeline.rs` — Orchestrates receivers → batch processor → file exporter → ingestion via tokio channels and CancellationToken
+- `ingestion.rs` — Periodic ingestion task: dedicated OS thread for DuckDB (Connection is !Send) + async ticker via std::sync::mpsc
+- `config.rs:IngestionConfig` — Optional `ingestion` YAML section with `interval` (default "2m") and `enabled` fields
 - `model.rs` — Flattens OpenTelemetry proto types into SpanRecord/MetricRecord/LogRecord for storage
 - `receiver/grpc.rs` — Tonic gRPC server implementing TraceService, MetricsService, LogsService
 - `receiver/http.rs` — Axum HTTP server for `/v1/{traces,metrics,logs}`
@@ -56,7 +59,8 @@ App (OTLP gRPC :4317 / HTTP :4318)
 
 **lotel-storage** (`crates/lotel-storage/src/`) — DuckDB persistence and query
 - `db.rs` — Opens DuckDB, runs migrations (creates traces/metrics/logs tables)
-- `ingest.rs` — Reads JSONL files, deserializes proto JSON, flattens, inserts into DuckDB
+- `ingest.rs` — Reads JSONL files, deserializes proto JSON, flattens, inserts into DuckDB (full re-read)
+- `ingest_incremental.rs` — `IncrementalIngester` tracks byte offsets per file to only ingest new lines (used by periodic ingestion)
 - `query.rs` — Builds parameterized SQL queries, returns typed JSON results
 - `prune.rs` — Deletes data older than cutoff, supports dry-run
 
