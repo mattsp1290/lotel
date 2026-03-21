@@ -2,6 +2,8 @@
 
 pub mod config;
 pub mod model;
+pub mod pipeline;
+pub mod receiver;
 
 #[cfg(test)]
 mod proto_check;

@@ -8,8 +8,8 @@ resolver = "2"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
-tonic = "0.13"
-prost = "0.13"
+tonic = "0.14"
+prost = "0.14"
 axum = "0.8"
 duckdb = { version = "1", features = ["bundled", "chrono"] }
 opentelemetry-proto = { version = "0.31", features = ["gen-tonic", "trace", "metrics", "logs", "with-serde"] }
@@ -22,3 +22,4 @@ thiserror = "2"
 anyhow = "1"
 tracing = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
