@@ -33,8 +33,15 @@ pub fn read_state() -> Result<Option<CollectorState>> {
         return Ok(None);
     }
     let content = fs::read_to_string(&path)?;
-    let state: CollectorState = serde_json::from_str(&content)?;
-    Ok(Some(state))
+    match serde_json::from_str(&content) {
+        Ok(state) => Ok(Some(state)),
+        Err(_) => {
+            // State file is from an incompatible version; discard it.
+            eprintln!("Warning: collector.state has incompatible format, removing it.");
+            fs::remove_file(&path)?;
+            Ok(None)
+        }
+    }
 }
 
 pub fn write_state(state: &CollectorState) -> Result<()> {
