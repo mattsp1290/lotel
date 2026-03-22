@@ -3,3 +3,4 @@ set -euo pipefail
 
 cargo build --release
 cp target/release/lotel-cli ./lotel
+codesign --force --sign - ./lotel
