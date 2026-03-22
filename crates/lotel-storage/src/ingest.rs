@@ -512,7 +512,7 @@ struct ScopeLog {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LogRecordJson {
-    #[serde(default, alias = "time_unix_nano")]
+    #[serde(default, alias = "time_unix_nano", alias = "observedTimeUnixNano")]
     time_unix_nano: OtlpNano,
     #[serde(alias = "severity_text")]
     severity_text: Option<String>,
