@@ -512,8 +512,10 @@ struct ScopeLog {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LogRecordJson {
-    #[serde(default, alias = "time_unix_nano", alias = "observedTimeUnixNano")]
+    #[serde(default, alias = "time_unix_nano")]
     time_unix_nano: OtlpNano,
+    #[serde(default, alias = "observed_time_unix_nano")]
+    observed_time_unix_nano: OtlpNano,
     #[serde(alias = "severity_text")]
     severity_text: Option<String>,
     #[serde(alias = "severity_number")]
@@ -544,7 +546,11 @@ pub(crate) fn ingest_log_line(tx: &Transaction, line: &str) -> Result<usize> {
 
         for sl in &rl.scope_logs {
             for lr in &sl.log_records {
-                let ts = lr.time_unix_nano.to_datetime();
+                let ts = lr
+                    .time_unix_nano
+                    .to_datetime()
+                    .or_else(|| lr.observed_time_unix_nano.to_datetime())
+                    .unwrap_or_else(|| chrono::Utc::now().naive_utc());
                 let attrs = lr
                     .attributes
                     .as_ref()
@@ -552,7 +558,7 @@ pub(crate) fn ingest_log_line(tx: &Transaction, line: &str) -> Result<usize> {
                     .unwrap_or(Value::Object(serde_json::Map::new()));
                 let attrs_str = serde_json::to_string(&attrs)?;
                 let body_str = lr.body.as_ref().map(|b| b.as_string());
-                let date_str = ts.map(|t| t.format("%Y-%m-%d").to_string());
+                let date_str = ts.format("%Y-%m-%d").to_string();
                 let trace_id = lr.trace_id.as_deref().filter(|s| !s.is_empty());
                 let span_id = lr.span_id.as_deref().filter(|s| !s.is_empty());
 
@@ -567,7 +573,7 @@ pub(crate) fn ingest_log_line(tx: &Transaction, line: &str) -> Result<usize> {
                         trace_id,
                         span_id,
                         attrs_str,
-                        date_str.as_deref(),
+                        date_str.as_str(),
                     ],
                 )?;
                 count += 1;
@@ -681,6 +687,63 @@ mod tests {
             .query_row("SELECT body FROM logs LIMIT 1", [], |row| row.get(0))
             .unwrap();
         assert_eq!(body, "hello world");
+    }
+
+    #[test]
+    fn ingest_logs_observed_time_fallback() {
+        let conn = setup_db();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let logs_dir = tmp.path().join("logs");
+        std::fs::create_dir_all(&logs_dir).unwrap();
+        let file = logs_dir.join("logs.jsonl");
+
+        // Log record with only observedTimeUnixNano, no timeUnixNano
+        let data = r#"{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"test-svc"}}]},"scopeLogs":[{"logRecords":[{"observedTimeUnixNano":"1710000000000000000","severityText":"WARN","severityNumber":13,"body":{"stringValue":"observed only"},"attributes":[]}]}]}]}"#;
+        std::fs::write(&file, format!("{data}\n")).unwrap();
+
+        ingest_logs(&conn, &file).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let ts: String = conn
+            .query_row(
+                "SELECT CAST(timestamp AS VARCHAR) FROM logs LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            ts.starts_with("2024-03-09"),
+            "expected observed timestamp, got {ts}"
+        );
+    }
+
+    #[test]
+    fn ingest_logs_missing_timestamps() {
+        let conn = setup_db();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let logs_dir = tmp.path().join("logs");
+        std::fs::create_dir_all(&logs_dir).unwrap();
+        let file = logs_dir.join("logs.jsonl");
+
+        // Log record with no timestamp fields at all — should fallback to now()
+        let data = r#"{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"test-svc"}}]},"scopeLogs":[{"logRecords":[{"severityText":"ERROR","severityNumber":17,"body":{"stringValue":"no timestamp"},"attributes":[]}]}]}]}"#;
+        std::fs::write(&file, format!("{data}\n")).unwrap();
+
+        ingest_logs(&conn, &file).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let body: String = conn
+            .query_row("SELECT body FROM logs LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(body, "no timestamp");
     }
 
     #[test]
