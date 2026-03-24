@@ -31,7 +31,12 @@ pub async fn run_ingestion_task(
         };
         let mut ingester = lotel_storage::IncrementalIngester::new();
 
-        // Initial full ingest (reads everything from offset 0).
+        // Load persisted cursors so we resume from last position after restart.
+        if let Err(e) = ingester.load_cursors(&conn) {
+            tracing::warn!("Failed to load ingestion cursors: {e}; starting from offset 0");
+        }
+
+        // Ingest new data from last cursor position (or offset 0 if no cursor).
         match ingester.ingest_new(&conn, &data_path) {
             Ok(report) if report.total() > 0 => {
                 tracing::info!("Initial ingestion: {report}");

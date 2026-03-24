@@ -8,7 +8,7 @@ pub mod query;
 
 // Re-export key types and functions at crate root.
 pub use db::{default_db, open_db, open_in_memory};
-pub use ingest::ingest_all;
+pub use ingest::{clear_ingest_cursors, clear_signal_tables, ingest_all};
 pub use ingest_incremental::{IncrementalIngester, IngestReport};
 pub use prune::{PruneReport, prune};
 pub use query::{

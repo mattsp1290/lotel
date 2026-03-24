@@ -33,7 +33,12 @@ enum Command {
     /// Check collector health (exit 0 if healthy, 1 if not)
     Health,
     /// Ingest JSONL telemetry files into the query database
-    Ingest,
+    Ingest {
+        /// Re-ingest all data from the beginning.
+        /// Clears existing telemetry data before re-ingesting.
+        #[arg(long)]
+        full: bool,
+    },
     /// Query telemetry data
     Query {
         #[command(subcommand)]
@@ -127,7 +132,7 @@ fn main() -> Result<()> {
         Command::Stop => cmd_stop()?,
         Command::Status => cmd_status()?,
         Command::Health => cmd_health()?,
-        Command::Ingest => cmd_ingest()?,
+        Command::Ingest { full } => cmd_ingest(full)?,
         Command::Query { subcommand } => cmd_query(subcommand)?,
         Command::Prune {
             older_than,
@@ -280,11 +285,18 @@ fn cmd_run_collector(config: &std::path::Path) -> Result<()> {
     })
 }
 
-fn cmd_ingest() -> Result<()> {
+fn cmd_ingest(full: bool) -> Result<()> {
     let data_path = lotel_collector::config::data_path().map_err(|e| anyhow::anyhow!("{e}"))?;
     let conn = lotel_storage::default_db()?;
-    lotel_storage::ingest_all(&conn, &data_path)?;
-    eprintln!("Ingestion complete.");
+    let mut ingester = lotel_storage::IncrementalIngester::new();
+    if full {
+        lotel_storage::clear_signal_tables(&conn)?;
+        lotel_storage::clear_ingest_cursors(&conn)?;
+    } else {
+        ingester.load_cursors(&conn)?;
+    }
+    let report = ingester.ingest_new(&conn, &data_path)?;
+    eprintln!("Ingestion complete: {report}");
     Ok(())
 }
 

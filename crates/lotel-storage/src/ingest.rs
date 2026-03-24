@@ -6,6 +6,28 @@ use duckdb::{Connection, Transaction};
 use serde::Deserialize;
 use serde_json::Value;
 
+/// Delete all rows from the `ingest_cursors` table.
+/// Used by `lotel ingest --full` to remove stale cursor entries for files that may
+/// no longer exist.
+pub fn clear_ingest_cursors(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM ingest_cursors", [])
+        .context("clearing ingest_cursors")?;
+    Ok(())
+}
+
+/// Delete all rows from the signal tables (traces, metrics, logs).
+/// Used by `lotel ingest --full` to prevent duplicates when re-ingesting from byte 0.
+/// Does not touch `ingest_cursors` — those are overwritten by subsequent ingestion.
+pub fn clear_signal_tables(conn: &Connection) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for table in ["traces", "metrics", "logs"] {
+        tx.execute(&format!("DELETE FROM {table}"), [])
+            .with_context(|| format!("clearing {table}"))?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Ingest all JSONL files from data_path into the database.
 pub fn ingest_all(conn: &Connection, data_path: &Path) -> Result<()> {
     for (signal, ingest_fn) in [
@@ -752,5 +774,50 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         // No files exist — should not error.
         ingest_all(&conn, tmp.path()).unwrap();
+    }
+
+    #[test]
+    fn clear_signal_tables_removes_all_rows() {
+        let conn = setup_db();
+        conn.execute(
+            "INSERT INTO traces VALUES ('t1','s1',NULL,'x',1,'2024-01-01 00:00:00','2024-01-01 00:00:01',1000000000,0,'svc','{}','2024-01-01')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO metrics VALUES ('m1','sum',1.0,'2024-01-01 00:00:00','svc',NULL,NULL,NULL,'{}','2024-01-01')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO logs VALUES ('2024-01-01 00:00:00','INFO',9,'body','svc',NULL,NULL,'{}','2024-01-01')",
+            [],
+        ).unwrap();
+
+        clear_signal_tables(&conn).unwrap();
+
+        for table in ["traces", "metrics", "logs"] {
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should be empty after clear");
+        }
+    }
+
+    #[test]
+    fn clear_signal_tables_preserves_cursors() {
+        let conn = setup_db();
+        conn.execute("INSERT INTO ingest_cursors VALUES ('/some/path', 1234)", [])
+            .unwrap();
+
+        clear_signal_tables(&conn).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ingest_cursors", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "cursors must not be deleted by clear_signal_tables"
+        );
     }
 }

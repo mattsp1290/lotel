@@ -189,11 +189,21 @@ service:
     handle.shutdown().await;
 }
 
-/// Periodic ingestion test: start collector with ingestion enabled -> send OTLP data ->
-/// verify data appears in DuckDB automatically without manual ingest call.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn periodic_ingestion_roundtrip() {
-    let tmp = tempfile::TempDir::new().unwrap();
+// ---------------------------------------------------------------------------
+// Shared test helpers for periodic-ingestion tests
+// ---------------------------------------------------------------------------
+
+struct TestPipeline {
+    handle: lotel_collector::pipeline::PipelineHandle,
+    http_port: u16,
+    client: reqwest::Client,
+}
+
+/// Build and start a pipeline configured for periodic ingestion (interval: 1s).
+///
+/// The YAML template is identical between `periodic_ingestion_roundtrip` and
+/// `cursor_survives_prune_and_reingest`, so it lives here.
+async fn start_test_pipeline(tmp: &tempfile::TempDir) -> TestPipeline {
     let traces_path = tmp.path().join("traces/traces.jsonl");
     let metrics_path = tmp.path().join("metrics/metrics.jsonl");
     let logs_path = tmp.path().join("logs/logs.jsonl");
@@ -254,16 +264,14 @@ service:
     );
 
     let test_config = config::parse_config(&yaml).expect("parse test config");
-    assert!(test_config.ingestion.is_some());
-
-    // Start the pipeline (includes ingestion task).
     let handle = lotel_collector::pipeline::Pipeline::run(&test_config).expect("start pipeline");
 
-    // Wait for health check.
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
         .unwrap();
+
+    // Wait for health check.
     let health_url = format!("http://127.0.0.1:{health_port}/");
     let mut healthy = false;
     for _ in 0..40 {
@@ -276,6 +284,28 @@ service:
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     assert!(healthy, "collector did not become healthy");
+
+    TestPipeline {
+        handle,
+        http_port,
+        client,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Periodic-ingestion tests
+// ---------------------------------------------------------------------------
+
+/// Periodic ingestion test: start collector with ingestion enabled -> send OTLP data ->
+/// verify data appears in DuckDB automatically without manual ingest call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn periodic_ingestion_roundtrip() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let TestPipeline {
+        handle,
+        http_port,
+        client,
+    } = start_test_pipeline(&tmp).await;
 
     // Send OTLP traces via HTTP.
     use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
@@ -371,6 +401,127 @@ service:
         .query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0))
         .unwrap();
     assert_eq!(count, 2, "should have exactly 2 traces (no duplicates)");
+
+    // Verify that ingestion cursors were persisted.
+    let cursor_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ingest_cursors WHERE byte_offset > 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        cursor_count > 0,
+        "should have persisted ingestion cursors with non-zero offsets"
+    );
+}
+
+/// Cursor-prune integration test: verify that after pruning, re-ingesting does NOT bring back
+/// pruned data because cursors have advanced past the old JSONL lines.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cursor_survives_prune_and_reingest() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let TestPipeline {
+        handle,
+        http_port,
+        client,
+    } = start_test_pipeline(&tmp).await;
+
+    // Send OTLP traces.
+    use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+    use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
+    use opentelemetry_proto::tonic::resource::v1::Resource;
+    use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+
+    let trace_req = ExportTraceServiceRequest {
+        resource_spans: vec![ResourceSpans {
+            resource: Some(Resource {
+                attributes: vec![KeyValue {
+                    key: "service.name".into(),
+                    value: Some(AnyValue {
+                        value: Some(any_value::Value::StringValue("cursor-prune-test".into())),
+                    }),
+                }],
+                ..Default::default()
+            }),
+            scope_spans: vec![ScopeSpans {
+                spans: vec![Span {
+                    name: "prune-me-span".into(),
+                    start_time_unix_nano: 1710000000000000000,
+                    end_time_unix_nano: 1710000001000000000,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    };
+    let trace_data = serde_json::to_value(&trace_req).unwrap();
+
+    let http_url = format!("http://127.0.0.1:{http_port}");
+    let resp = client
+        .post(format!("{http_url}/v1/traces"))
+        .json(&trace_data)
+        .send()
+        .await
+        .expect("send traces");
+    assert!(resp.status().is_success());
+
+    // Wait for batch flush + ingestion tick.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Shutdown collector.
+    handle.shutdown().await;
+
+    // Open DB, verify trace was ingested.
+    let db_path = tmp.path().join("lotel.db");
+    let conn = lotel_storage::open_db(&db_path).unwrap();
+
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 1, "should have 1 trace before pruning");
+
+    // Verify cursors exist.
+    let cursor_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ingest_cursors WHERE byte_offset > 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(cursor_count > 0, "cursors should be persisted");
+
+    // Prune all data from DuckDB.
+    let cutoff = chrono::Utc::now().naive_utc() + chrono::Duration::hours(1);
+    let reports = lotel_storage::prune(&conn, cutoff, None, false).unwrap();
+    assert!(
+        reports.iter().any(|r| r.deleted > 0),
+        "should have pruned the trace"
+    );
+
+    // Verify trace is gone.
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0, "traces should be empty after prune");
+
+    // Now re-ingest using IncrementalIngester with persisted cursors.
+    // This simulates `lotel ingest` after pruning.
+    let mut ingester = lotel_storage::IncrementalIngester::new();
+    ingester.load_cursors(&conn).unwrap();
+    let report = ingester.ingest_new(&conn, tmp.path()).unwrap();
+    assert_eq!(
+        report.total(),
+        0,
+        "cursor should prevent re-ingestion of pruned data"
+    );
+
+    // Verify DB is still empty — pruned data was NOT brought back.
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0, "pruned data must not come back after re-ingest");
 }
 
 async fn get_free_port() -> u16 {
