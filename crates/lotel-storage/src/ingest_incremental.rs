@@ -299,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn full_ingest_ignores_saved_cursors() {
+    fn full_ingest_clears_and_reingests() {
         let conn = db::open_in_memory().unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         let traces_dir = tmp.path().join("traces");
@@ -313,15 +313,16 @@ mod tests {
         let mut ingester1 = IncrementalIngester::new();
         ingester1.ingest_new(&conn, tmp.path()).unwrap();
 
-        // "Full" ingest: new ingester WITHOUT load_cursors — re-reads from byte 0.
+        // "Full" ingest: clear tables first (as cmd_ingest --full does), then re-read.
+        crate::ingest::clear_signal_tables(&conn).unwrap();
         let mut ingester_full = IncrementalIngester::new();
         let report = ingester_full.ingest_new(&conn, tmp.path()).unwrap();
         assert_eq!(report.traces, 1); // Re-ingested from the start.
 
-        // DB now has 2 rows (the duplicate from full re-ingest).
+        // DB has exactly 1 row — no duplicates.
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 1);
     }
 }

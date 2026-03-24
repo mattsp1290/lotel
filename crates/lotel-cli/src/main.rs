@@ -34,8 +34,8 @@ enum Command {
     Health,
     /// Ingest JSONL telemetry files into the query database
     Ingest {
-        /// Re-ingest all data from the beginning, ignoring saved cursors.
-        /// Warning: may create duplicate records if data was already ingested.
+        /// Re-ingest all data from the beginning.
+        /// Clears existing telemetry data before re-ingesting.
         #[arg(long)]
         full: bool,
     },
@@ -289,7 +289,9 @@ fn cmd_ingest(full: bool) -> Result<()> {
     let data_path = lotel_collector::config::data_path().map_err(|e| anyhow::anyhow!("{e}"))?;
     let conn = lotel_storage::default_db()?;
     let mut ingester = lotel_storage::IncrementalIngester::new();
-    if !full {
+    if full {
+        lotel_storage::clear_signal_tables(&conn)?;
+    } else {
         ingester.load_cursors(&conn)?;
     }
     let report = ingester.ingest_new(&conn, &data_path)?;
