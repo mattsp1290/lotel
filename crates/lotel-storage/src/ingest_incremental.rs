@@ -84,8 +84,8 @@ impl IncrementalIngester {
 
             if file_size < offset {
                 // File was truncated or rotated — reset cursor to beginning.
-                eprintln!(
-                    "Warning: {signal} file shrank from {offset} to {file_size} bytes; \
+                tracing::warn!(
+                    "{signal} file shrank from {offset} to {file_size} bytes; \
                      resetting cursor"
                 );
                 self.offsets.insert(file_path.clone(), 0);
@@ -139,10 +139,13 @@ impl IncrementalIngester {
         }
 
         // Save cursor atomically within the same transaction as the data.
-        let path_str = file_path.to_string_lossy();
+        let path_str = file_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!("file path is not valid UTF-8: {}", file_path.display())
+        })?;
         tx.execute(
-            "INSERT OR REPLACE INTO ingest_cursors (file_path, byte_offset) VALUES (?, ?)",
-            duckdb::params![path_str.as_ref(), new_offset],
+            "INSERT INTO ingest_cursors (file_path, byte_offset) VALUES (?, ?) \
+             ON CONFLICT (file_path) DO UPDATE SET byte_offset = excluded.byte_offset",
+            duckdb::params![path_str, new_offset],
         )
         .context("saving ingest cursor")?;
 

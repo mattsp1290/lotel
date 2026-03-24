@@ -189,11 +189,21 @@ service:
     handle.shutdown().await;
 }
 
-/// Periodic ingestion test: start collector with ingestion enabled -> send OTLP data ->
-/// verify data appears in DuckDB automatically without manual ingest call.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn periodic_ingestion_roundtrip() {
-    let tmp = tempfile::TempDir::new().unwrap();
+// ---------------------------------------------------------------------------
+// Shared test helpers for periodic-ingestion tests
+// ---------------------------------------------------------------------------
+
+struct TestPipeline {
+    handle: lotel_collector::pipeline::PipelineHandle,
+    http_port: u16,
+    client: reqwest::Client,
+}
+
+/// Build and start a pipeline configured for periodic ingestion (interval: 1s).
+///
+/// The YAML template is identical between `periodic_ingestion_roundtrip` and
+/// `cursor_survives_prune_and_reingest`, so it lives here.
+async fn start_test_pipeline(tmp: &tempfile::TempDir) -> TestPipeline {
     let traces_path = tmp.path().join("traces/traces.jsonl");
     let metrics_path = tmp.path().join("metrics/metrics.jsonl");
     let logs_path = tmp.path().join("logs/logs.jsonl");
@@ -254,16 +264,14 @@ service:
     );
 
     let test_config = config::parse_config(&yaml).expect("parse test config");
-    assert!(test_config.ingestion.is_some());
-
-    // Start the pipeline (includes ingestion task).
     let handle = lotel_collector::pipeline::Pipeline::run(&test_config).expect("start pipeline");
 
-    // Wait for health check.
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
         .unwrap();
+
+    // Wait for health check.
     let health_url = format!("http://127.0.0.1:{health_port}/");
     let mut healthy = false;
     for _ in 0..40 {
@@ -276,6 +284,28 @@ service:
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     assert!(healthy, "collector did not become healthy");
+
+    TestPipeline {
+        handle,
+        http_port,
+        client,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Periodic-ingestion tests
+// ---------------------------------------------------------------------------
+
+/// Periodic ingestion test: start collector with ingestion enabled -> send OTLP data ->
+/// verify data appears in DuckDB automatically without manual ingest call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn periodic_ingestion_roundtrip() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let TestPipeline {
+        handle,
+        http_port,
+        client,
+    } = start_test_pipeline(&tmp).await;
 
     // Send OTLP traces via HTTP.
     use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
@@ -391,85 +421,11 @@ service:
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cursor_survives_prune_and_reingest() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let traces_path = tmp.path().join("traces/traces.jsonl");
-    let metrics_path = tmp.path().join("metrics/metrics.jsonl");
-    let logs_path = tmp.path().join("logs/logs.jsonl");
-
-    let grpc_port = get_free_port().await;
-    let http_port = get_free_port().await;
-    let health_port = get_free_port().await;
-
-    let yaml = format!(
-        r#"
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 127.0.0.1:{grpc_port}
-      http:
-        endpoint: 127.0.0.1:{http_port}
-processors:
-  batch:
-    timeout: 100ms
-    send_batch_size: 1
-    send_batch_max_size: 10
-exporters:
-  file/traces:
-    path: {traces}
-    format: json
-  file/metrics:
-    path: {metrics}
-    format: json
-  file/logs:
-    path: {logs}
-    format: json
-extensions:
-  health_check:
-    endpoint: 127.0.0.1:{health_port}
-ingestion:
-  interval: 1s
-  enabled: true
-service:
-  extensions: [health_check]
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [file/traces]
-    metrics:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [file/metrics]
-    logs:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [file/logs]
-"#,
-        traces = traces_path.display(),
-        metrics = metrics_path.display(),
-        logs = logs_path.display(),
-    );
-
-    let test_config = config::parse_config(&yaml).expect("parse test config");
-    let handle = lotel_collector::pipeline::Pipeline::run(&test_config).expect("start pipeline");
-
-    // Wait for health check.
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .unwrap();
-    let health_url = format!("http://127.0.0.1:{health_port}/");
-    let mut healthy = false;
-    for _ in 0..40 {
-        if let Ok(resp) = client.get(&health_url).send().await
-            && resp.status().is_success()
-        {
-            healthy = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-    assert!(healthy, "collector did not become healthy");
+    let TestPipeline {
+        handle,
+        http_port,
+        client,
+    } = start_test_pipeline(&tmp).await;
 
     // Send OTLP traces.
     use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;

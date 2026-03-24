@@ -85,6 +85,8 @@ fn migrate(conn: &Connection) -> Result<(), StorageError> {
             attributes      JSON,
             date            DATE NOT NULL
         )",
+        // Cursors survive prune operations intentionally — they track JSONL file
+        // byte offsets to prevent re-ingestion. Only `lotel ingest --full` resets them.
         "CREATE TABLE IF NOT EXISTS ingest_cursors (
             file_path    VARCHAR NOT NULL PRIMARY KEY,
             byte_offset  UBIGINT NOT NULL

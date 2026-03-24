@@ -34,7 +34,8 @@ enum Command {
     Health,
     /// Ingest JSONL telemetry files into the query database
     Ingest {
-        /// Re-ingest all data from the beginning, ignoring saved cursors
+        /// Re-ingest all data from the beginning, ignoring saved cursors.
+        /// Warning: may create duplicate records if data was already ingested.
         #[arg(long)]
         full: bool,
     },
