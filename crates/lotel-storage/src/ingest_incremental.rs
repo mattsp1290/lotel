@@ -80,7 +80,7 @@ impl IncrementalIngester {
             let metadata = std::fs::metadata(&file_path)
                 .with_context(|| format!("reading metadata for {signal}"))?;
             let file_size = metadata.len();
-            let offset = self.offsets.get(&file_path).copied().unwrap_or(0);
+            let mut offset = self.offsets.get(&file_path).copied().unwrap_or(0);
 
             if file_size < offset {
                 // File was truncated or rotated — reset cursor to beginning.
@@ -88,14 +88,14 @@ impl IncrementalIngester {
                     "{signal} file shrank from {offset} to {file_size} bytes; \
                      resetting cursor"
                 );
+                offset = 0;
                 self.offsets.insert(file_path.clone(), 0);
                 // Fall through to ingest from 0.
             } else if file_size == offset {
                 continue; // No new data.
             }
 
-            let start_offset = self.offsets.get(&file_path).copied().unwrap_or(0);
-            let ingested = self.ingest_file(conn, &file_path, start_offset, *ingest_fn)?;
+            let ingested = self.ingest_file(conn, &file_path, offset, *ingest_fn)?;
             match *signal {
                 "traces" => report.traces = ingested,
                 "metrics" => report.metrics = ingested,
@@ -324,5 +324,18 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM traces", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
+
+        // Verify cursor was overwritten (not stale from first ingest).
+        let cursor_offset: u64 = conn
+            .query_row(
+                "SELECT byte_offset FROM ingest_cursors LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            cursor_offset > 0,
+            "cursor should be at end of file after full re-ingest"
+        );
     }
 }

@@ -6,6 +6,15 @@ use duckdb::{Connection, Transaction};
 use serde::Deserialize;
 use serde_json::Value;
 
+/// Delete all rows from the `ingest_cursors` table.
+/// Used by `lotel ingest --full` to remove stale cursor entries for files that may
+/// no longer exist.
+pub fn clear_ingest_cursors(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM ingest_cursors", [])
+        .context("clearing ingest_cursors")?;
+    Ok(())
+}
+
 /// Delete all rows from the signal tables (traces, metrics, logs).
 /// Used by `lotel ingest --full` to prevent duplicates when re-ingesting from byte 0.
 /// Does not touch `ingest_cursors` — those are overwritten by subsequent ingestion.

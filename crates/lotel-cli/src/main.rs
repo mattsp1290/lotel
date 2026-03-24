@@ -291,6 +291,7 @@ fn cmd_ingest(full: bool) -> Result<()> {
     let mut ingester = lotel_storage::IncrementalIngester::new();
     if full {
         lotel_storage::clear_signal_tables(&conn)?;
+        lotel_storage::clear_ingest_cursors(&conn)?;
     } else {
         ingester.load_cursors(&conn)?;
     }
