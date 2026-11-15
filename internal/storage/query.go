@@ -177,9 +177,14 @@ func queryTraces(db queryer, opts TraceQueryOptions, recent bool, page *pagePosi
 	if opts.MinDuration != nil && *opts.MinDuration < 0 {
 		return nil, fmt.Errorf("minimum duration must be nonnegative")
 	}
-	query := `SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR), CAST(json_object('trace_state',"trace_state",'status_message',"status_message",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version",'schema_url',"schema_url",'events',"events",'links',"links") AS VARCHAR) FROM traces WHERE 1=1`
+	query := `SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR), CAST(json_object('trace_state',"trace_state",'status_message',"status_message",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version",'schema_url',"schema_url",'events',"events",'links',"links") AS VARCHAR)`
 	if page != nil {
-		query = strings.Replace(query, " FROM traces WHERE", ", cursor_id FROM traces WHERE", 1)
+		query += ", cursor_id"
+	}
+	if recent {
+		query += ` FROM (SELECT COLUMNS(c -> c <> 'cursor_id') FROM traces) AS traces WHERE 1=1`
+	} else {
+		query += " FROM traces WHERE 1=1"
 	}
 	var args []any
 	if recent || page != nil {
@@ -203,7 +208,7 @@ func queryTraces(db queryer, opts TraceQueryOptions, recent bool, page *pagePosi
 	if page != nil {
 		query += " ORDER BY start_time DESC, cursor_id DESC"
 	} else if recent {
-		query += ` ORDER BY start_time DESC, json_merge_patch(to_json(traces), '{"cursor_id":null}') ASC, CAST(attributes AS VARCHAR) ASC NULLS FIRST, CAST(resource_attributes AS VARCHAR) ASC NULLS FIRST, CAST(events AS VARCHAR) ASC NULLS FIRST, CAST(links AS VARCHAR) ASC NULLS FIRST`
+		query += ` ORDER BY start_time DESC, to_json(traces) ASC, CAST(attributes AS VARCHAR) ASC NULLS FIRST, CAST(resource_attributes AS VARCHAR) ASC NULLS FIRST, CAST(events AS VARCHAR) ASC NULLS FIRST, CAST(links AS VARCHAR) ASC NULLS FIRST`
 	} else {
 		query += " ORDER BY start_time ASC"
 	}
@@ -313,9 +318,14 @@ func queryLogs(db queryer, opts LogQueryOptions, recent bool, page *pagePosition
 	if err := validateLogFilters(opts.MinSeverity, opts.BodyContains); err != nil {
 		return nil, err
 	}
-	query := `SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR), CAST(json_object('observed_timestamp',strftime("observed_timestamp", '%Y-%m-%dT%H:%M:%S.%fZ'),'event_name',"event_name",'body_value',body_json,'flags',"flags",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version") AS VARCHAR) FROM logs WHERE 1=1`
+	query := `SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR), CAST(json_object('observed_timestamp',strftime("observed_timestamp", '%Y-%m-%dT%H:%M:%S.%fZ'),'event_name',"event_name",'body_value',body_json,'flags',"flags",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version") AS VARCHAR)`
 	if page != nil {
-		query = strings.Replace(query, " FROM logs WHERE", ", cursor_id FROM logs WHERE", 1)
+		query += ", cursor_id"
+	}
+	if recent {
+		query += ` FROM (SELECT COLUMNS(c -> c <> 'cursor_id') FROM logs) AS logs WHERE 1=1`
+	} else {
+		query += " FROM logs WHERE 1=1"
 	}
 	var args []any
 	if recent || page != nil {
@@ -332,7 +342,7 @@ func queryLogs(db queryer, opts LogQueryOptions, recent bool, page *pagePosition
 	if page != nil {
 		query += " ORDER BY timestamp DESC, cursor_id DESC"
 	} else if recent {
-		query += ` ORDER BY timestamp DESC, json_merge_patch(to_json(logs), '{"cursor_id":null}') ASC, CAST(attributes AS VARCHAR) ASC NULLS FIRST, CAST(resource_attributes AS VARCHAR) ASC NULLS FIRST, CAST(body_json AS VARCHAR) ASC NULLS FIRST`
+		query += ` ORDER BY timestamp DESC, to_json(logs) ASC, CAST(attributes AS VARCHAR) ASC NULLS FIRST, CAST(resource_attributes AS VARCHAR) ASC NULLS FIRST, CAST(body_json AS VARCHAR) ASC NULLS FIRST`
 	} else {
 		query += " ORDER BY timestamp ASC"
 	}
