@@ -61,7 +61,8 @@ func TestStateRoundtrip(t *testing.T) {
 }
 
 func TestIsContainerRunning_NoDocker(t *testing.T) {
-	// When no container named lotel-collector exists, should return false.
+	// An unavailable Docker executable must be reported as not running.
+	t.Setenv("PATH", t.TempDir())
 	running := isContainerRunning()
 	if running {
 		t.Error("expected false when no lotel-collector container exists")
@@ -69,7 +70,10 @@ func TestIsContainerRunning_NoDocker(t *testing.T) {
 }
 
 func TestCheckHealth_NoServer(t *testing.T) {
-	// No server running on 13133, should return false.
+	// Exercise an unreachable endpoint independently of the local collector.
+	old := healthURL
+	healthURL = "http://127.0.0.1:0/"
+	defer func() { healthURL = old }()
 	healthy := checkHealth()
 	if healthy {
 		t.Error("expected unhealthy when no server is running")

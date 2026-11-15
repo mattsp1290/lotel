@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -103,14 +105,15 @@ func main() {
 			if err != nil {
 				return err
 			}
-			db, err := storage.DB()
+			db, err := openDB()
 			if err != nil {
 				return err
 			}
-			if err := storage.IngestAll(db, dataPath); err != nil {
+			report, err := storage.IngestAll(db, dataPath)
+			if err != nil {
 				return err
 			}
-			fmt.Println("Ingestion complete.")
+			printJSON(report)
 			return nil
 		},
 	}
@@ -128,17 +131,20 @@ func main() {
 		Use:   "traces",
 		Short: "Query traces (JSON output)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := storage.DB()
+			db, err := openDB()
 			if err != nil {
 				return err
 			}
-			opts, err := parseQueryOpts(service, since, until, limit)
+			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
 			}
 			results, err := storage.QueryTraces(db, opts)
 			if err != nil {
 				return err
+			}
+			if results == nil {
+				results = []storage.TraceResult{}
 			}
 			printJSON(results)
 			return nil
@@ -149,17 +155,20 @@ func main() {
 		Use:   "metrics",
 		Short: "Query metrics (JSON output)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := storage.DB()
+			db, err := openDB()
 			if err != nil {
 				return err
 			}
-			opts, err := parseQueryOpts(service, since, until, limit)
+			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
 			}
 			results, err := storage.QueryMetrics(db, opts)
 			if err != nil {
 				return err
+			}
+			if results == nil {
+				results = []storage.MetricResult{}
 			}
 			printJSON(results)
 			return nil
@@ -170,17 +179,20 @@ func main() {
 		Use:   "logs",
 		Short: "Query logs (JSON output)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := storage.DB()
+			db, err := openDB()
 			if err != nil {
 				return err
 			}
-			opts, err := parseQueryOpts(service, since, until, limit)
+			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
 			}
 			results, err := storage.QueryLogs(db, opts)
 			if err != nil {
 				return err
+			}
+			if results == nil {
+				results = []storage.LogResult{}
 			}
 			printJSON(results)
 			return nil
@@ -191,12 +203,12 @@ func main() {
 	var metricName string
 	queryAggCmd := &cobra.Command{
 		Use:   "aggregate",
-		Short: "Compute avg/min/max for a metric over a time window",
+		Short: "Compute avg/min/max; for cumulative histograms, read the latest query metrics point",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if metricName == "" {
 				return fmt.Errorf("--metric is required")
 			}
-			db, err := storage.DB()
+			db, err := openDB()
 			if err != nil {
 				return err
 			}
@@ -222,7 +234,17 @@ func main() {
 		cmd.Flags().IntVar(&limit, "limit", 0, "max results (0 = unlimited)")
 	}
 
-	queryCmd.AddCommand(queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd)
+	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd} {
+		cmd.Flags().String("name", "", "exact span or metric name")
+	}
+	for _, cmd := range []*cobra.Command{queryTracesCmd, queryLogsCmd} {
+		cmd.Flags().String("trace-id", "", "trace ID (lowercase hex)")
+	}
+	queryLogsCmd.Flags().String("event-name", "", "exact log event name")
+	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd, queryLogsCmd} {
+		cmd.Flags().StringArray("attr", nil, "attribute key=value; repeat for AND; matches compact JSON string form, null never matches")
+	}
+	queryCmd.AddCommand(queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand())
 
 	// --- prune ---
 	var olderThan string
@@ -251,7 +273,7 @@ func main() {
 				cutoff = time.Now().Add(-dur)
 			}
 
-			db, err := storage.DB()
+			db, err := openDB()
 			if err != nil {
 				return err
 			}
@@ -329,4 +351,38 @@ func parseDuration(s string) (time.Duration, error) {
 		}
 	}
 	return time.ParseDuration(s)
+}
+
+func openDB() (*sql.DB, error) {
+	db, err := storage.DB()
+	if err == nil && storage.SchemaRebuilt {
+		fmt.Fprintln(os.Stderr, "lotel: database rebuilt for schema v2; run 'lotel ingest' to reload raw telemetry")
+		storage.SchemaRebuilt = false
+	}
+	return db, err
+}
+
+func parseAttrFlags(flags []string) ([]storage.AttrFilter, error) {
+	var out []storage.AttrFilter
+	for _, flag := range flags {
+		key, value, ok := strings.Cut(flag, "=")
+		if !ok || key == "" {
+			return nil, fmt.Errorf("invalid --attr %q: expected nonempty key=value", flag)
+		}
+		out = append(out, storage.AttrFilter{Key: key, Value: value})
+	}
+	return out, nil
+}
+
+func parseCommandQueryOpts(cmd *cobra.Command, service, since, until string, limit int) (storage.QueryOptions, error) {
+	opts, err := parseQueryOpts(service, since, until, limit)
+	if err != nil {
+		return opts, err
+	}
+	opts.Name, _ = cmd.Flags().GetString("name")
+	opts.TraceID, _ = cmd.Flags().GetString("trace-id")
+	opts.EventName, _ = cmd.Flags().GetString("event-name")
+	flags, _ := cmd.Flags().GetStringArray("attr")
+	opts.Attrs, err = parseAttrFlags(flags)
+	return opts, err
 }

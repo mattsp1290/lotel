@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ type State struct {
 	ContainerName string    `json:"container_name"`
 	Image         string    `json:"image"`
 	StartedAt     time.Time `json:"started_at"`
+	ConfigSHA256  string    `json:"config_sha256"`
 	ConfigPath    string    `json:"config_path"`
 	DataPath      string    `json:"data_path"`
 }
@@ -36,11 +38,12 @@ type Status struct {
 const (
 	stateDir  = ".lotel"
 	stateFile = "collector.state"
-	healthURL = "http://localhost:13133/"
 
 	containerName = "lotel-collector"
-	defaultImage  = "otel/opentelemetry-collector-contrib:latest"
+	defaultImage  = "otel/opentelemetry-collector-contrib:0.165.0"
 )
+
+var healthURL = "http://localhost:13133/"
 
 func stateFilePath() (string, error) {
 	home, err := os.UserHomeDir()
@@ -127,10 +130,32 @@ func containerExists() bool {
 
 // Start launches the collector as a Docker container.
 func Start(ctx context.Context, configPath, dataPath string) error {
-	// Check if already running.
+	absConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
+	configBytes, err := os.ReadFile(absConfig)
+	if err != nil {
+		return err
+	}
+	cfgHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
 	if isContainerRunning() {
-		fmt.Printf("Collector is already running (container %s).\n", containerName)
-		return nil
+		state, err := readState()
+		if err != nil {
+			return err
+		}
+		restart, warning := restartDecision(state, defaultImage, absConfig, cfgHash)
+		if !restart {
+			if warning != "" {
+				fmt.Fprintln(os.Stderr, warning)
+			}
+			fmt.Printf("Collector is already running (container %s).\n", containerName)
+			return nil
+		}
+		fmt.Println("Collector config or image changed; restarting.")
+		if err := Stop(ctx); err != nil {
+			return err
+		}
 	}
 
 	// Clean up stale container if it exists but isn't running.
@@ -153,11 +178,6 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 		}
 	}
 
-	// Resolve to absolute paths for Docker bind mounts.
-	absConfig, err := filepath.Abs(configPath)
-	if err != nil {
-		return fmt.Errorf("resolving config path: %w", err)
-	}
 	absData, err := filepath.Abs(dataPath)
 	if err != nil {
 		return fmt.Errorf("resolving data path: %w", err)
@@ -186,6 +206,7 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 		Image:         defaultImage,
 		StartedAt:     time.Now(),
 		ConfigPath:    absConfig,
+		ConfigSHA256:  cfgHash,
 		DataPath:      absData,
 	}
 	if err := writeState(newState); err != nil {
@@ -291,4 +312,14 @@ func ContainerID() string {
 		return state.ContainerID
 	}
 	return ""
+}
+
+func restartDecision(s *State, image, cfgPath, cfgHash string) (bool, string) {
+	if s == nil || s.Image != image {
+		return true, ""
+	}
+	if s.ConfigPath != cfgPath {
+		return false, fmt.Sprintf("collector is running with config %s; this directory resolves %s. Run 'lotel stop' first to switch.", s.ConfigPath, cfgPath)
+	}
+	return s.ConfigSHA256 != cfgHash, ""
 }

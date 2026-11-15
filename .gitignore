@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-lotel
+/lotel
 
 # Test binary, built with `go test -c`
 *.test
@@ -34,3 +34,5 @@ logs/
 
 # Beads cache
 .beads/.cache/
+
+.venv-it/

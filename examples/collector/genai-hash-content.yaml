@@ -1,0 +1,100 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  gen_ai_normalizer:
+    sources:
+      - name: openinference
+      - name: openllmetry
+  transform/genai_content:
+    error_mode: propagate
+    trace_statements:
+      - context: span
+        statements:
+          - 'set(cache["content"], span.attributes)'
+          - 'keep_matching_keys(cache["content"], "^(gen_ai\\.(input|output)\\.messages|gen_ai\\.system_instructions|gen_ai\\.tool\\.(definitions|call\\.arguments|call\\.result)|gen_ai\\.(prompt|completion)(\\..*)?|(input|output)\\.value|llm\\.(input|output)_messages\\..*|(gen_ai|llm)\\.(prompts|completions)\\..*)$")'
+          - 'stringify_all(cache["content"])'
+          - 'replace_all_patterns(cache["content"], "value", "(?s)^.*$", "$$0", SHA256)'
+          - 'merge_maps(span.attributes, cache["content"], "upsert")'
+          - 'delete_key(cache, "content")'
+      - context: spanevent
+        statements:
+          - 'set(cache["content"], spanevent.attributes)'
+          - 'keep_matching_keys(cache["content"], "^(gen_ai\\.(input|output)\\.messages|gen_ai\\.system_instructions|gen_ai\\.tool\\.(definitions|call\\.arguments|call\\.result)|gen_ai\\.(prompt|completion)(\\..*)?|(input|output)\\.value|llm\\.(input|output)_messages\\..*|(gen_ai|llm)\\.(prompts|completions)\\..*)$")'
+          - 'stringify_all(cache["content"])'
+          - 'replace_all_patterns(cache["content"], "value", "(?s)^.*$", "$$0", SHA256)'
+          - 'merge_maps(spanevent.attributes, cache["content"], "upsert")'
+          - 'delete_key(cache, "content")'
+    log_statements:
+      - context: log
+        statements:
+          - 'set(cache["content"], log.attributes)'
+          - 'keep_matching_keys(cache["content"], "^(gen_ai\\.(input|output)\\.messages|gen_ai\\.system_instructions|gen_ai\\.tool\\.(definitions|call\\.arguments|call\\.result)|gen_ai\\.(prompt|completion)(\\..*)?|(input|output)\\.value|llm\\.(input|output)_messages\\..*|(gen_ai|llm)\\.(prompts|completions)\\..*)$")'
+          - 'stringify_all(cache["content"])'
+          - 'replace_all_patterns(cache["content"], "value", "(?s)^.*$", "$$0", SHA256)'
+          - 'merge_maps(log.attributes, cache["content"], "upsert")'
+          - 'delete_key(cache, "content")'
+          - 'set(cache["content"], log.body) where IsMap(log.body) and IsMatch(log.event_name, "^gen_ai\\.")'
+          - 'keep_matching_keys(cache["content"], "^(gen_ai\\.(input|output)\\.messages|gen_ai\\.system_instructions|gen_ai\\.tool\\.(definitions|call\\.arguments|call\\.result)|gen_ai\\.(prompt|completion)(\\..*)?|(input|output)\\.value|llm\\.(input|output)_messages\\..*|(gen_ai|llm)\\.(prompts|completions)\\..*)$") where IsMap(log.body) and IsMatch(log.event_name, "^gen_ai\\.")'
+          - 'stringify_all(cache["content"]) where IsMap(log.body) and IsMatch(log.event_name, "^gen_ai\\.")'
+          - 'replace_all_patterns(cache["content"], "value", "(?s)^.*$", "$$0", SHA256) where IsMap(log.body) and IsMatch(log.event_name, "^gen_ai\\.")'
+          - 'merge_maps(log.body, cache["content"], "upsert") where IsMap(log.body) and IsMatch(log.event_name, "^gen_ai\\.")'
+          - 'delete_key(cache, "content") where IsMap(log.body) and IsMatch(log.event_name, "^gen_ai\\.")'
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+exporters:
+  file/traces:
+    path: /data/traces/traces.jsonl
+    format: json
+    append: true
+  file/metrics:
+    path: /data/metrics/metrics.jsonl
+    format: json
+    append: true
+  file/logs:
+    path: /data/logs/logs.jsonl
+    format: json
+    append: true
+
+connectors:
+  spanmetrics:
+    aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
+    metrics_flush_interval: 5s
+    metrics_expiration: 5m
+    dimensions:
+      - name: gen_ai.operation.name
+      - name: gen_ai.provider.name
+      - name: gen_ai.request.model
+      - name: gen_ai.response.model
+      - name: error.type
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [gen_ai_normalizer, transform/genai_content, batch]
+      exporters: [file/traces, spanmetrics]
+    metrics:
+      receivers: [otlp, spanmetrics]
+      processors: [batch]
+      exporters: [file/metrics]
+    logs:
+      receivers: [otlp]
+      processors: [transform/genai_content, batch]
+      exporters: [file/logs]
+  telemetry:
+    logs:
+      level: info

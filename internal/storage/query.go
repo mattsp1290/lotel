@@ -4,55 +4,94 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // QueryOptions contains common query parameters.
+type AttrFilter struct{ Key, Value string }
+
 type QueryOptions struct {
-	Service string
-	Since   time.Time
-	Until   time.Time
-	Limit   int
+	Name      string
+	TraceID   string
+	EventName string
+	Attrs     []AttrFilter
+	Service   string
+	Since     time.Time
+	Until     time.Time
+	Limit     int
 }
 
 // TraceResult represents a single span in query results.
 type TraceResult struct {
-	TraceID      string            `json:"trace_id"`
-	SpanID       string            `json:"span_id"`
-	ParentSpanID string            `json:"parent_span_id,omitempty"`
-	Name         string            `json:"name"`
-	Kind         int               `json:"kind"`
-	StartTime    time.Time         `json:"start_time"`
-	EndTime      time.Time         `json:"end_time"`
-	DurationNs   int64             `json:"duration_ns"`
-	StatusCode   int               `json:"status_code"`
-	ServiceName  string            `json:"service_name"`
-	Attributes   map[string]string `json:"attributes,omitempty"`
+	TraceState         string         `json:"trace_state,omitempty"`
+	StatusMessage      string         `json:"status_message,omitempty"`
+	ResourceAttributes map[string]any `json:"resource_attributes,omitempty"`
+	ScopeName          string         `json:"scope_name,omitempty"`
+	ScopeVersion       string         `json:"scope_version,omitempty"`
+	SchemaURL          string         `json:"schema_url,omitempty"`
+	Events             []SpanEvent    `json:"events,omitempty"`
+	Links              []SpanLink     `json:"links,omitempty"`
+	TraceID            string         `json:"trace_id"`
+	SpanID             string         `json:"span_id"`
+	ParentSpanID       string         `json:"parent_span_id,omitempty"`
+	Name               string         `json:"name"`
+	Kind               int            `json:"kind"`
+	StartTime          time.Time      `json:"start_time"`
+	EndTime            time.Time      `json:"end_time"`
+	DurationNs         int64          `json:"duration_ns"`
+	StatusCode         int            `json:"status_code"`
+	ServiceName        string         `json:"service_name"`
+	Attributes         map[string]any `json:"attributes,omitempty"`
 }
 
 // MetricResult represents a single metric data point.
 type MetricResult struct {
-	MetricName             string            `json:"metric_name"`
-	MetricType             string            `json:"metric_type"`
-	Value                  float64           `json:"value"`
-	Timestamp              time.Time         `json:"timestamp"`
-	ServiceName            string            `json:"service_name"`
-	AggregationTemporality int               `json:"aggregation_temporality,omitempty"`
-	IsMonotonic            bool              `json:"is_monotonic,omitempty"`
-	Unit                   string            `json:"unit,omitempty"`
-	Attributes             map[string]string `json:"attributes,omitempty"`
+	Description            string         `json:"description,omitempty"`
+	StartTimestamp         *time.Time     `json:"start_timestamp,omitempty"`
+	Count                  *int64         `json:"count,omitempty"`
+	Sum                    *float64       `json:"sum,omitempty"`
+	Min                    *float64       `json:"min,omitempty"`
+	Max                    *float64       `json:"max,omitempty"`
+	ExplicitBounds         []any          `json:"explicit_bounds,omitempty"`
+	BucketCounts           []int64        `json:"bucket_counts,omitempty"`
+	ExpScale               *int           `json:"exp_scale,omitempty"`
+	ExpZeroCount           *int64         `json:"exp_zero_count,omitempty"`
+	ExpPositive            *ExpBuckets    `json:"exp_positive,omitempty"`
+	ExpNegative            *ExpBuckets    `json:"exp_negative,omitempty"`
+	Quantiles              []Quantile     `json:"quantiles,omitempty"`
+	ResourceAttributes     map[string]any `json:"resource_attributes,omitempty"`
+	ScopeName              string         `json:"scope_name,omitempty"`
+	ScopeVersion           string         `json:"scope_version,omitempty"`
+	MetricName             string         `json:"metric_name"`
+	MetricType             string         `json:"metric_type"`
+	Value                  *float64       `json:"value"`
+	Timestamp              time.Time      `json:"timestamp"`
+	ServiceName            string         `json:"service_name"`
+	AggregationTemporality int            `json:"aggregation_temporality,omitempty"`
+	IsMonotonic            bool           `json:"is_monotonic,omitempty"`
+	Unit                   string         `json:"unit,omitempty"`
+	Attributes             map[string]any `json:"attributes,omitempty"`
 }
 
 // LogResult represents a single log record.
 type LogResult struct {
-	Timestamp      time.Time         `json:"timestamp"`
-	Severity       string            `json:"severity,omitempty"`
-	SeverityNumber int               `json:"severity_number,omitempty"`
-	Body           string            `json:"body"`
-	ServiceName    string            `json:"service_name"`
-	TraceID        string            `json:"trace_id,omitempty"`
-	SpanID         string            `json:"span_id,omitempty"`
-	Attributes     map[string]string `json:"attributes,omitempty"`
+	ObservedTimestamp  *time.Time     `json:"observed_timestamp,omitempty"`
+	EventName          string         `json:"event_name,omitempty"`
+	BodyValue          any            `json:"body_value,omitempty"`
+	Flags              int            `json:"flags,omitempty"`
+	ResourceAttributes map[string]any `json:"resource_attributes,omitempty"`
+	ScopeName          string         `json:"scope_name,omitempty"`
+	ScopeVersion       string         `json:"scope_version,omitempty"`
+	Timestamp          time.Time      `json:"timestamp"`
+	Severity           string         `json:"severity,omitempty"`
+	SeverityNumber     int            `json:"severity_number,omitempty"`
+	Body               string         `json:"body"`
+	ServiceName        string         `json:"service_name"`
+	TraceID            string         `json:"trace_id,omitempty"`
+	SpanID             string         `json:"span_id,omitempty"`
+	Attributes         map[string]any `json:"attributes,omitempty"`
 }
 
 // MetricAggregation holds aggregation results for a metric.
@@ -67,8 +106,12 @@ type MetricAggregation struct {
 
 // QueryTraces returns traces matching the given options.
 func QueryTraces(db *sql.DB, opts QueryOptions) ([]TraceResult, error) {
-	query := `SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR) FROM traces WHERE 1=1`
+	if err := validateQueryOptions(opts); err != nil {
+		return nil, err
+	}
+	query := `SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR), CAST(json_object('trace_state',"trace_state",'status_message',"status_message",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version",'schema_url',"schema_url",'events',"events",'links',"links") AS VARCHAR) FROM traces WHERE 1=1`
 	args := buildWhere(&query, opts, "start_time")
+	args = append(args, buildFilters(&query, opts, "name")...)
 
 	query += " ORDER BY start_time ASC"
 	if opts.Limit > 0 {
@@ -86,7 +129,8 @@ func QueryTraces(db *sql.DB, opts QueryOptions) ([]TraceResult, error) {
 		var r TraceResult
 		var parentSpanID sql.NullString
 		var attrsJSON sql.NullString
-		err := rows.Scan(&r.TraceID, &r.SpanID, &parentSpanID, &r.Name, &r.Kind, &r.StartTime, &r.EndTime, &r.DurationNs, &r.StatusCode, &r.ServiceName, &attrsJSON)
+		var metadata string
+		err := rows.Scan(&r.TraceID, &r.SpanID, &parentSpanID, &r.Name, &r.Kind, &r.StartTime, &r.EndTime, &r.DurationNs, &r.StatusCode, &r.ServiceName, &attrsJSON, &metadata)
 		if err != nil {
 			return nil, fmt.Errorf("scanning trace row: %w", err)
 		}
@@ -94,7 +138,12 @@ func QueryTraces(db *sql.DB, opts QueryOptions) ([]TraceResult, error) {
 			r.ParentSpanID = parentSpanID.String
 		}
 		if attrsJSON.Valid {
-			json.Unmarshal([]byte(attrsJSON.String), &r.Attributes)
+			if err := json.Unmarshal([]byte(attrsJSON.String), &r.Attributes); err != nil {
+				return nil, fmt.Errorf("decoding attributes: %w", err)
+			}
+		}
+		if err := json.Unmarshal([]byte(metadata), &r); err != nil {
+			return nil, fmt.Errorf("decoding metadata: %w", err)
 		}
 		results = append(results, r)
 	}
@@ -103,8 +152,12 @@ func QueryTraces(db *sql.DB, opts QueryOptions) ([]TraceResult, error) {
 
 // QueryMetrics returns metrics matching the given options.
 func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
-	query := `SELECT metric_name, metric_type, value, timestamp, service_name, aggregation_temporality, is_monotonic, unit, CAST(attributes AS VARCHAR) FROM metrics WHERE 1=1`
+	if err := validateQueryOptions(opts); err != nil {
+		return nil, err
+	}
+	query := `SELECT metric_name, metric_type, value, timestamp, service_name, aggregation_temporality, is_monotonic, unit, CAST(attributes AS VARCHAR), CAST(json_object('description',"description",'start_timestamp',strftime("start_timestamp", '%Y-%m-%dT%H:%M:%S.%fZ'),'count',"count",'sum',"sum",'min',"min",'max',"max",'explicit_bounds',"explicit_bounds",'bucket_counts',"bucket_counts",'exp_scale',"exp_scale",'exp_zero_count',"exp_zero_count",'exp_positive',"exp_positive",'exp_negative',"exp_negative",'quantiles',"quantiles",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version") AS VARCHAR) FROM metrics WHERE 1=1`
 	args := buildWhere(&query, opts, "timestamp")
+	args = append(args, buildFilters(&query, opts, "metric_name")...)
 
 	query += " ORDER BY timestamp ASC"
 	if opts.Limit > 0 {
@@ -124,7 +177,8 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 		var monotonic sql.NullBool
 		var unit sql.NullString
 		var attrsJSON sql.NullString
-		err := rows.Scan(&r.MetricName, &r.MetricType, &r.Value, &r.Timestamp, &r.ServiceName, &temporality, &monotonic, &unit, &attrsJSON)
+		var metadata string
+		err := rows.Scan(&r.MetricName, &r.MetricType, &r.Value, &r.Timestamp, &r.ServiceName, &temporality, &monotonic, &unit, &attrsJSON, &metadata)
 		if err != nil {
 			return nil, fmt.Errorf("scanning metric row: %w", err)
 		}
@@ -138,7 +192,12 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 			r.Unit = unit.String
 		}
 		if attrsJSON.Valid {
-			json.Unmarshal([]byte(attrsJSON.String), &r.Attributes)
+			if err := json.Unmarshal([]byte(attrsJSON.String), &r.Attributes); err != nil {
+				return nil, fmt.Errorf("decoding attributes: %w", err)
+			}
+		}
+		if err := json.Unmarshal([]byte(metadata), &r); err != nil {
+			return nil, fmt.Errorf("decoding metadata: %w", err)
 		}
 		results = append(results, r)
 	}
@@ -147,8 +206,12 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 
 // QueryLogs returns logs matching the given options.
 func QueryLogs(db *sql.DB, opts QueryOptions) ([]LogResult, error) {
-	query := `SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR) FROM logs WHERE 1=1`
+	if err := validateQueryOptions(opts); err != nil {
+		return nil, err
+	}
+	query := `SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR), CAST(json_object('observed_timestamp',strftime("observed_timestamp", '%Y-%m-%dT%H:%M:%S.%fZ'),'event_name',"event_name",'body_value',body_json,'flags',"flags",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version") AS VARCHAR) FROM logs WHERE 1=1`
 	args := buildWhere(&query, opts, "timestamp")
+	args = append(args, buildFilters(&query, opts, "")...)
 
 	query += " ORDER BY timestamp ASC"
 	if opts.Limit > 0 {
@@ -167,7 +230,8 @@ func QueryLogs(db *sql.DB, opts QueryOptions) ([]LogResult, error) {
 		var severity sql.NullString
 		var traceID, spanID sql.NullString
 		var attrsJSON sql.NullString
-		err := rows.Scan(&r.Timestamp, &severity, &r.SeverityNumber, &r.Body, &r.ServiceName, &traceID, &spanID, &attrsJSON)
+		var metadata string
+		err := rows.Scan(&r.Timestamp, &severity, &r.SeverityNumber, &r.Body, &r.ServiceName, &traceID, &spanID, &attrsJSON, &metadata)
 		if err != nil {
 			return nil, fmt.Errorf("scanning log row: %w", err)
 		}
@@ -181,7 +245,12 @@ func QueryLogs(db *sql.DB, opts QueryOptions) ([]LogResult, error) {
 			r.SpanID = spanID.String
 		}
 		if attrsJSON.Valid {
-			json.Unmarshal([]byte(attrsJSON.String), &r.Attributes)
+			if err := json.Unmarshal([]byte(attrsJSON.String), &r.Attributes); err != nil {
+				return nil, fmt.Errorf("decoding attributes: %w", err)
+			}
+		}
+		if err := json.Unmarshal([]byte(metadata), &r); err != nil {
+			return nil, fmt.Errorf("decoding metadata: %w", err)
 		}
 		results = append(results, r)
 	}
@@ -243,6 +312,62 @@ func buildWhere(query *string, opts QueryOptions, timeCol string) []interface{} 
 	if !opts.Until.IsZero() {
 		*query += fmt.Sprintf(" AND %s <= ?", timeCol)
 		args = append(args, opts.Until)
+	}
+	return args
+}
+
+type SpanEvent struct {
+	Time       time.Time      `json:"time"`
+	Name       string         `json:"name"`
+	Attributes map[string]any `json:"attributes"`
+}
+type SpanLink struct {
+	TraceID    string         `json:"trace_id"`
+	SpanID     string         `json:"span_id"`
+	TraceState string         `json:"trace_state"`
+	Attributes map[string]any `json:"attributes"`
+}
+type ExpBuckets struct {
+	Offset       int     `json:"offset"`
+	BucketCounts []int64 `json:"bucket_counts"`
+}
+type Quantile struct {
+	Quantile any `json:"quantile"`
+	Value    any `json:"value"`
+}
+
+func validateQueryOptions(opts QueryOptions) error {
+	for _, attr := range opts.Attrs {
+		if attr.Key == "" {
+			return fmt.Errorf("attribute key cannot be empty")
+		}
+		for _, r := range attr.Key {
+			if unicode.IsControl(r) {
+				return fmt.Errorf("attribute key contains a control character")
+			}
+		}
+	}
+	return nil
+}
+
+func buildFilters(query *string, opts QueryOptions, nameColumn string) []any {
+	var args []any
+	if opts.Name != "" && nameColumn != "" {
+		*query += " AND " + nameColumn + " = ?"
+		args = append(args, opts.Name)
+	}
+	if opts.TraceID != "" {
+		*query += " AND trace_id = ?"
+		args = append(args, strings.ToLower(opts.TraceID))
+	}
+	if opts.EventName != "" {
+		*query += " AND event_name = ?"
+		args = append(args, opts.EventName)
+	}
+	for _, attr := range opts.Attrs {
+		key := strings.ReplaceAll(strings.ReplaceAll(attr.Key, `\`, `\\`), `"`, `\"`)
+		*query += " AND json_extract_string(attributes, ?) = ?"
+		args = append(args, `$."`+key+`"`, attr.Value)
 	}
 	return args
 }

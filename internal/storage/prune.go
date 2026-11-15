@@ -16,6 +16,7 @@ type PruneReport struct {
 
 // Prune deletes telemetry data older than the cutoff time.
 // If dryRun is true, returns what would be deleted without deleting.
+// Pruned rows can reappear after a schema rebuild because raw JSONL is retained.
 func Prune(db *sql.DB, cutoff time.Time, service string, dryRun bool) ([]PruneReport, error) {
 	signals := []string{"traces", "metrics", "logs"}
 	timeCols := map[string]string{

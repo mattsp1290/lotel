@@ -167,7 +167,7 @@ func TestIngestTraces(t *testing.T) {
 	os.WriteFile(filepath.Join(tracesDir, "traces.jsonl"), []byte(jsonl), 0o644)
 
 	// Ingest.
-	if err := IngestAll(db, filepath.Join(tmp, "data")); err != nil {
+	if _, err := IngestAll(db, filepath.Join(tmp, "data")); err != nil {
 		t.Fatalf("IngestAll: %v", err)
 	}
 
@@ -198,7 +198,7 @@ func TestIngestMetrics(t *testing.T) {
 `
 	os.WriteFile(filepath.Join(metricsDir, "metrics.jsonl"), []byte(jsonl), 0o644)
 
-	if err := IngestAll(db, filepath.Join(tmp, "data")); err != nil {
+	if _, err := IngestAll(db, filepath.Join(tmp, "data")); err != nil {
 		t.Fatalf("IngestAll: %v", err)
 	}
 
@@ -209,8 +209,8 @@ func TestIngestMetrics(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 metric, got %d", len(results))
 	}
-	if results[0].Value != 42 {
-		t.Errorf("value = %f, want 42", results[0].Value)
+	if results[0].Value == nil || *results[0].Value != 42 {
+		t.Errorf("value = %v, want 42", results[0].Value)
 	}
 }
 
@@ -228,7 +228,7 @@ func TestIngestLogs(t *testing.T) {
 `
 	os.WriteFile(filepath.Join(logsDir, "logs.jsonl"), []byte(jsonl), 0o644)
 
-	if err := IngestAll(db, filepath.Join(tmp, "data")); err != nil {
+	if _, err := IngestAll(db, filepath.Join(tmp, "data")); err != nil {
 		t.Fatalf("IngestAll: %v", err)
 	}
 

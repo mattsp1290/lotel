@@ -26,6 +26,8 @@ Core command surface:
 - `lotel query traces`
 - `lotel query metrics`
 - `lotel query logs`
+- `lotel query genai calls`
+- `lotel query genai usage`
 - `lotel query aggregate`
 - `lotel prune`
 
@@ -60,7 +62,8 @@ Use while implementing features and refactors.
 2. After each meaningful code change + run, execute `ingest`.
 3. Confirm expected spans exist for key paths (main request, DB call, external API call).
 4. Check metrics for obvious regressions (latency growth, error spikes).
-5. Keep queries time-bounded with `--since` to avoid stale interpretation.
+5. For LLM features, confirm `./lotel query genai calls --service <svc> --since 10m` lists the expected model calls with non-null token counts.
+6. Keep queries time-bounded with `--since` to avoid stale interpretation.
 
 Suggested checks:
 
@@ -79,6 +82,9 @@ Use when behavior is wrong, flaky, or unexpectedly slow.
 4. Correlate with logs/metrics in the same time window.
 5. Repeat after each fix attempt and compare outputs.
 
+For LLM failures, inspect `./lotel query genai calls --errors-only --content --since 30m`
+and `./lotel query logs --event-name gen_ai.client.inference.operation.details --since 30m`.
+
 Debug focus examples:
 
 ```bash
@@ -95,6 +101,7 @@ Goal: verify the change is observable, not just functional.
 
 Checklist:
 
+- LLM calls emit `gen_ai.operation.name`, `gen_ai.provider.name`, and `gen_ai.usage.*` attributes
 - critical user flows emit traces with expected span structure
 - key SLI-like metrics are present and queryable
 - error paths emit logs with enough diagnostic context
@@ -115,6 +122,9 @@ Example gate commands:
 - `internal/collector/` - subprocess lifecycle (start/stop/status/health)
 - `internal/config/` - config resolution and defaults
 - `internal/storage/` - DuckDB schema, JSONL ingestion, query, prune
+- `internal/storage/genai.go` - GenAI aliases, calls, and usage queries
+- `examples/collector/` - opt-in content redaction and hash recipes
+- `scripts/genai_integration.py` - optional live OpenCode Go test
 - `scripts/verify.py` - end-to-end verification script
 
 ## Issue tracking (bd)

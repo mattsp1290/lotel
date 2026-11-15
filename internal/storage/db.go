@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	_ "github.com/marcboeker/go-duckdb"
@@ -58,12 +59,60 @@ func dbPath() (string, error) {
 	return filepath.Join(dir, "lotel.db"), nil
 }
 
+const schemaVersion = 2
+
+var SchemaRebuilt bool
+
 func migrate(db *sql.DB) error {
+	SchemaRebuilt = false
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS schema_meta (key VARCHAR PRIMARY KEY, value VARCHAR)`); err != nil {
+		return err
+	}
+	var versionText string
+	err = tx.QueryRow(`SELECT value FROM schema_meta WHERE key='schema_version'`).Scan(&versionText)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	version := 0
+	if err == nil {
+		version, err = strconv.Atoi(versionText)
+		if err != nil {
+			return fmt.Errorf("invalid database schema version: %w", err)
+		}
+	}
+	if version > schemaVersion {
+		return fmt.Errorf("database schema v%d is newer than this lotel (v2); upgrade lotel or delete the database", version)
+	}
+	rebuilt := false
+	if version < schemaVersion {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='traces')`).Scan(&rebuilt); err != nil {
+			return err
+		}
+		for _, table := range []string{"traces", "metrics", "logs", "ingest_state"} {
+			if _, err := tx.Exec("DROP TABLE IF EXISTS " + table); err != nil {
+				return err
+			}
+		}
+	}
+
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS traces (
 			trace_id       VARCHAR NOT NULL,
 			span_id        VARCHAR NOT NULL,
 			parent_span_id VARCHAR,
+   trace_state VARCHAR,
+   status_message VARCHAR,
+   resource_attributes JSON,
+   scope_name VARCHAR,
+   scope_version VARCHAR,
+   schema_url VARCHAR,
+   events JSON,
+   links JSON,
 			name           VARCHAR NOT NULL,
 			kind           INTEGER,
 			start_time     TIMESTAMP NOT NULL,
@@ -77,6 +126,22 @@ func migrate(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS metrics (
 			metric_name              VARCHAR NOT NULL,
 			metric_type              VARCHAR NOT NULL,
+   description VARCHAR,
+   start_timestamp TIMESTAMP,
+   "count" BIGINT,
+   "sum" DOUBLE,
+   "min" DOUBLE,
+   "max" DOUBLE,
+   explicit_bounds JSON,
+   bucket_counts JSON,
+   exp_scale INTEGER,
+   exp_zero_count BIGINT,
+   exp_positive JSON,
+   exp_negative JSON,
+   quantiles JSON,
+   resource_attributes JSON,
+   scope_name VARCHAR,
+   scope_version VARCHAR,
 			value                    DOUBLE,
 			timestamp                TIMESTAMP NOT NULL,
 			service_name             VARCHAR NOT NULL,
@@ -88,7 +153,14 @@ func migrate(db *sql.DB) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS logs (
 			timestamp       TIMESTAMP NOT NULL,
-			severity        VARCHAR,
+			observed_timestamp TIMESTAMP,
+   event_name VARCHAR,
+   body_json JSON,
+   flags INTEGER,
+   resource_attributes JSON,
+   scope_name VARCHAR,
+   scope_version VARCHAR,
+   severity        VARCHAR,
 			severity_number INTEGER,
 			body            VARCHAR,
 			service_name    VARCHAR NOT NULL,
@@ -97,11 +169,25 @@ func migrate(db *sql.DB) error {
 			attributes      JSON,
 			date            DATE NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS ingest_state (
+   path VARCHAR PRIMARY KEY,
+   byte_offset BIGINT,
+   fingerprint VARCHAR,
+   fingerprint_len INTEGER,
+   updated_at TIMESTAMP
+  )`,
 	}
 	for _, stmt := range stmts {
-		if _, err := db.Exec(stmt); err != nil {
+		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("migration: %w", err)
 		}
 	}
+	if _, err := tx.Exec(`INSERT INTO schema_meta VALUES ('schema_version','2') ON CONFLICT(key) DO UPDATE SET value=excluded.value`); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	SchemaRebuilt = rebuilt
 	return nil
 }

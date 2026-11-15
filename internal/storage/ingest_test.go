@@ -21,7 +21,7 @@ func TestIngestAndQueryRoundtrip(t *testing.T) {
 	writeTestJSONL(t, dataPath)
 
 	// Ingest all signals.
-	if err := IngestAll(db, dataPath); err != nil {
+	if _, err := IngestAll(db, dataPath); err != nil {
 		t.Fatalf("IngestAll: %v", err)
 	}
 
@@ -125,15 +125,27 @@ func TestIngestIdempotent(t *testing.T) {
 	dataPath := filepath.Join(tmp, "data")
 	writeTestJSONL(t, dataPath)
 
-	// Ingest twice — should duplicate data (no dedup in current design).
-	IngestAll(db, dataPath)
-	IngestAll(db, dataPath)
-
-	traces, _ := QueryTraces(db, QueryOptions{Service: "test-uuid-svc"})
-	// We expect 4 traces (2x2) since we ingested twice with no dedup.
-	if len(traces) != 4 {
-		t.Errorf("after double ingest: traces=%d, want 4", len(traces))
+	for i := 0; i < 2; i++ {
+		report, err := IngestAll(db, dataPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			for signal, rep := range report.Signals {
+				if rep.Records != 0 {
+					t.Fatalf("%s duplicated %d records", signal, rep.Records)
+				}
+			}
+		}
 	}
+	traces, err := QueryTraces(db, QueryOptions{Service: "test-uuid-svc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(traces) != 2 {
+		t.Fatalf("after double ingest: traces=%d, want 2", len(traces))
+	}
+
 }
 
 func TestQueryEmptyDB(t *testing.T) {
