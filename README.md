@@ -285,7 +285,7 @@ child span identities. Each endpoint contains `service.name` and
 Duplicate trace/span identities are excluded rather than
 guessed. The `exclusions` counts categorize each excluded SERVER record once, in
 the order shown in the JSON. Duplicate child records count individually there.
-Missing or invalid IDs, missing parents, ambiguous identities, invalid projected
+Missing or invalid projected IDs, missing parents, ambiguous identities, invalid projected
 service identity types, unknown services,
 non-client parents, and same-service pairs are excluded. An `unknown` service
 can be either a real name or the ingestion fallback, so both are excluded. SDK
