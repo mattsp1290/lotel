@@ -276,7 +276,9 @@ and unit. Dropped resource or scope attributes and resource entity references
 are unsupported. The result is an observed pair difference, not a rate or a
 complete-window total. It assumes a single writer. Ingestion or retention can
 leave history incomplete, including missing resets or missing-value markers.
-Complete OTLP history may require a full backfill from retained raw files.
+Results use retained envelopes only. Ingestion canonicalizes top-level JSON objects;
+duplicate top-level resourceMetrics fields can lose earlier values. Full backfill
+repeats that loss and cannot recover or detect it.
 The selector is limited to 4 MiB. The scan stops with an indeterminate error
 after 100,000 envelopes, 4 MiB in one envelope, 64 MiB of
 envelope data, 100,000 points across all streams, or one million JSON tokens.
@@ -284,6 +286,10 @@ Every retained metrics envelope must decode completely. Unknown or malformed
 protobuf fields, malformed attributes, and unsupported enum values or resource
 entity references anywhere make the result indeterminate, even in unrelated
 streams. This does not validate every semantic rule for unrelated metric values.
+The database materializes the bounded payload scan (up to 64 MiB of payload plus
+query and decoding overhead); metadata and payload each require a table scan.
+The metadata limit bounds matching rows, with database vector read-ahead; it does
+not bound scanning unrelated rows.
 
 ## Query options
 

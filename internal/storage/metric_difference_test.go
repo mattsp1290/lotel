@@ -362,7 +362,7 @@ func TestMetricDifferencePreflightsAllEnvelopeSizes(t *testing.T) {
 	}
 }
 
-func TestMetricEnvelopePagesUseBytesAndOneSnapshot(t *testing.T) {
+func TestMetricEnvelopePreflightUsesBytesAndOneSnapshot(t *testing.T) {
 	db, err := OpenDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -377,18 +377,18 @@ func TestMetricEnvelopePagesUseBytesAndOneSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	pages, err := metricEnvelopePages(tx)
+	size, err := metricEnvelopePreflight(tx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pages) != 1 || len(pages[0]) != 1 || pages[0][0].size != len(payload) {
-		t.Fatalf("wrong byte size: %+v", pages)
+	if size.count != 1 || size.bytes != len(payload) {
+		t.Fatalf("wrong byte size: %+v", size)
 	}
 	if _, err := db.Exec(`DELETE FROM otlp_envelopes WHERE signal='metrics'`); err != nil {
 		t.Fatal(err)
 	}
 	var got string
-	if err := visitMetricPage(tx, pages[0], func(raw []byte) error { got = string(raw); return nil }); err != nil {
+	if err := visitMetricEnvelopes(tx, size, func(raw []byte) error { got = string(raw); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if got != payload {
@@ -497,49 +497,6 @@ func TestMetricDifferenceRejectsDuplicateSchemaAliases(t *testing.T) {
 			t.Fatal("possibly matching duplicate alias accepted")
 		}
 	})
-}
-
-func TestMetricEnvelopePagesStayWithinByteBudget(t *testing.T) {
-	db, err := OpenDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	payload := `{"resourceMetrics":[],"text":"` + strings.Repeat("x", 2<<20) + `"}`
-	for i := 0; i < 3; i++ {
-		if _, err := db.Exec(`INSERT INTO otlp_envelopes (signal,service_name,payload) VALUES ('metrics','other',?)`, payload); err != nil {
-			t.Fatal(err)
-		}
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	pages, err := metricEnvelopePages(tx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pages) != 3 {
-		t.Fatalf("expected separate pages under byte cap, got %d", len(pages))
-	}
-	for _, page := range pages {
-		size := 0
-		for _, ref := range page {
-			size += ref.size
-		}
-		if size > metricPageByteLimit || len(page) > metricPageRowLimit {
-			t.Fatalf("over-budget page: %d bytes, %d rows", size, len(page))
-		}
-		if err := visitMetricPage(tx, page, func(raw []byte) error {
-			if len(raw) != len(payload) {
-				t.Fatalf("wrong payload size %d", len(raw))
-			}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
 }
 
 func TestMetricDifferenceRejectsConflictingLaterSameEpoch(t *testing.T) {
@@ -688,5 +645,39 @@ func TestMetricDifferenceRejectsMalformedAttributesAnywhere(t *testing.T) {
 				t.Fatal("malformed unrelated envelope accepted")
 			}
 		})
+	}
+}
+
+func TestMetricSelectorPreflightsPointsAndNesting(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	malformed := strings.Replace(differenceTestPoint("20", "2", "8"), `"asInt":"8"`, `"future":8`, 1)
+	for _, tc := range []struct{ name, selector, reason string }{
+		{"extra point before decode", metricEnvelope("A", first+","+malformed), "point scan limit"},
+		{"nesting before decode", `{"x":` + strings.Repeat(`[`, metricJSONRecursionLimit+2) + `0` + strings.Repeat(`]`, metricJSONRecursionLimit+2) + `}`, "nesting limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateMetricSelector([]byte(tc.selector)); err == nil || !strings.Contains(err.Error(), tc.reason) {
+				t.Fatalf("preflight: %v", err)
+			}
+		})
+	}
+}
+
+func TestMetricEnvelopePreflightRejectsAggregateBytes(t *testing.T) {
+	db, err := OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO otlp_envelopes (signal,service_name,payload) SELECT 'metrics','other', ('{"padding":"' || repeat('x', 3145728) || '"}')::JSON FROM range(22)`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := metricEnvelopePreflight(tx); err == nil || !strings.Contains(err.Error(), "scan byte limit") {
+		t.Fatalf("aggregate preflight: %v", err)
 	}
 }

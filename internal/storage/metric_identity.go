@@ -133,6 +133,10 @@ func parseMetricSelection(data []byte) (metricSelection, error) {
 	if len(data) > MetricSelectorByteLimit {
 		return id, fmt.Errorf("metric selector exceeds size limit")
 	}
+	budget := metricJSONBudget{maxPoints: 1}
+	if err := budget.scan(data); err != nil {
+		return id, err
+	}
 	m, err := decodeMetricEnvelope(data)
 	if err != nil {
 		return id, err

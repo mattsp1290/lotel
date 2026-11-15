@@ -8,8 +8,9 @@ import (
 )
 
 type metricJSONBudget struct {
-	points int
-	tokens int
+	points    int
+	tokens    int
+	maxPoints int
 }
 
 func (budget *metricJSONBudget) token(decoder *json.Decoder) (json.Token, error) {
@@ -55,7 +56,11 @@ func (budget *metricJSONBudget) scanValue(decoder *json.Decoder, key string, dep
 		for decoder.More() {
 			if key == "dataPoints" || key == "data_points" {
 				budget.points++
-				if budget.points > metricPointLimit {
+				limit := budget.maxPoints
+				if limit == 0 {
+					limit = metricPointLimit
+				}
+				if budget.points > limit {
 					return fmt.Errorf("indeterminate: metric point scan limit exceeded")
 				}
 			}

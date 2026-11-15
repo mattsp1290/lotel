@@ -182,89 +182,87 @@ func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]metri
 		return nil, err
 	}
 	defer tx.Rollback()
-	pages, err := metricEnvelopePages(tx)
+	size, err := metricEnvelopePreflight(tx)
 	if err != nil {
 		return nil, err
 	}
 	var points []metricObservation
 	budget := metricJSONBudget{}
-	for _, page := range pages {
-		err := visitMetricPage(tx, page, func(raw []byte) error {
-			if err := budget.scan(raw); err != nil {
-				return err
-			}
-			data, err := decodeMetricEnvelope(raw)
-			if err != nil {
-				return fmt.Errorf("indeterminate: unsupported or malformed retained metrics envelope: %w", err)
-			}
-			if err := validateMetricEnvelope(data); err != nil {
-				return err
-			}
-			for _, resource := range data.ResourceMetrics {
-				if resource == nil {
-					return fmt.Errorf("indeterminate: missing resource envelope")
-				}
-				if resource.SchemaUrl != id.resourceSchema {
-					continue
-				}
-				resourceRelation := metricResourceRelation(resource.Resource, id)
-				if resourceRelation == metricIdentityDisjoint {
-					continue
-				}
-				for _, scope := range resource.ScopeMetrics {
-					if scope == nil {
-						return fmt.Errorf("indeterminate: missing scope envelope")
-					}
-					if scope.SchemaUrl != id.scopeSchema {
-						continue
-					}
-					scopeRelation := metricScopeRelation(scope.Scope, id)
-					if scopeRelation == metricIdentityDisjoint {
-						continue
-					}
-					for _, metric := range scope.Metrics {
-						if metric == nil {
-							return fmt.Errorf("indeterminate: missing metric")
-						}
-						if metric.Name != id.name || metric.Unit != id.unit {
-							continue
-						}
-						err := visitMetricPoints(metric, func(attrs metricPointAttributes, point *metricpb.NumberDataPoint, validType bool) error {
-							pointRelation := metricPointRelation(attrs.GetAttributes(), id)
-							if pointRelation == metricIdentityDisjoint {
-								return nil
-							}
-							if resourceRelation != metricIdentityMatch || scopeRelation != metricIdentityMatch || pointRelation != metricIdentityMatch {
-								return fmt.Errorf("indeterminate: possibly matching incomplete identity")
-							}
-							if !validType || point == nil {
-								return fmt.Errorf("indeterminate: conflicting metric type or temporality")
-							}
-							if point.TimeUnixNano == 0 {
-								return fmt.Errorf("indeterminate: matching point has no timestamp")
-							}
-							if point.StartTimeUnixNano > point.TimeUnixNano {
-								return fmt.Errorf("indeterminate: point has invalid start time")
-							}
-							value, ok := point.Value.(*metricpb.NumberDataPoint_AsInt)
-							observation := metricObservation{timestamp: point.TimeUnixNano, start: point.StartTimeUnixNano, flags: point.Flags, integer: ok}
-							if ok {
-								observation.value = value.AsInt
-							}
-							points = append(points, observation)
-							return nil
-						})
-						if err != nil {
-							return err
-						}
-					}
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
+	err = visitMetricEnvelopes(tx, size, func(raw []byte) error {
+		if err := budget.scan(raw); err != nil {
+			return err
 		}
+		data, err := decodeMetricEnvelope(raw)
+		if err != nil {
+			return fmt.Errorf("indeterminate: unsupported or malformed retained metrics envelope: %w", err)
+		}
+		if err := validateMetricEnvelope(data); err != nil {
+			return err
+		}
+		for _, resource := range data.ResourceMetrics {
+			if resource == nil {
+				return fmt.Errorf("indeterminate: missing resource envelope")
+			}
+			if resource.SchemaUrl != id.resourceSchema {
+				continue
+			}
+			resourceRelation := metricResourceRelation(resource.Resource, id)
+			if resourceRelation == metricIdentityDisjoint {
+				continue
+			}
+			for _, scope := range resource.ScopeMetrics {
+				if scope == nil {
+					return fmt.Errorf("indeterminate: missing scope envelope")
+				}
+				if scope.SchemaUrl != id.scopeSchema {
+					continue
+				}
+				scopeRelation := metricScopeRelation(scope.Scope, id)
+				if scopeRelation == metricIdentityDisjoint {
+					continue
+				}
+				for _, metric := range scope.Metrics {
+					if metric == nil {
+						return fmt.Errorf("indeterminate: missing metric")
+					}
+					if metric.Name != id.name || metric.Unit != id.unit {
+						continue
+					}
+					err := visitMetricPoints(metric, func(attrs metricPointAttributes, point *metricpb.NumberDataPoint, validType bool) error {
+						pointRelation := metricPointRelation(attrs.GetAttributes(), id)
+						if pointRelation == metricIdentityDisjoint {
+							return nil
+						}
+						if resourceRelation != metricIdentityMatch || scopeRelation != metricIdentityMatch || pointRelation != metricIdentityMatch {
+							return fmt.Errorf("indeterminate: possibly matching incomplete identity")
+						}
+						if !validType || point == nil {
+							return fmt.Errorf("indeterminate: conflicting metric type or temporality")
+						}
+						if point.TimeUnixNano == 0 {
+							return fmt.Errorf("indeterminate: matching point has no timestamp")
+						}
+						if point.StartTimeUnixNano > point.TimeUnixNano {
+							return fmt.Errorf("indeterminate: point has invalid start time")
+						}
+						value, ok := point.Value.(*metricpb.NumberDataPoint_AsInt)
+						observation := metricObservation{timestamp: point.TimeUnixNano, start: point.StartTimeUnixNano, flags: point.Flags, integer: ok}
+						if ok {
+							observation.value = value.AsInt
+						}
+						points = append(points, observation)
+						return nil
+					})
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

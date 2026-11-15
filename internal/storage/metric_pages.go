@@ -3,81 +3,56 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 )
 
-const metricPageByteLimit = 4 << 20
-const metricPageRowLimit = 64
+type metricEnvelopeSize struct{ count, bytes int }
 
-type metricEnvelopeRef struct {
-	id   int64
-	size int
-}
-
-func metricEnvelopePages(tx *sql.Tx) ([][]metricEnvelopeRef, error) {
-	rows, err := tx.Query(`SELECT rowid, strlen(CAST(payload AS VARCHAR)) FROM otlp_envelopes WHERE signal='metrics' ORDER BY rowid LIMIT ?`, metricEnvelopeLimit+1)
+// DuckDB materializes query results before returning rows. Preflight metadata
+// first, then issue one payload query capped by the same transaction snapshot.
+func metricEnvelopePreflight(tx *sql.Tx) (metricEnvelopeSize, error) {
+	rows, err := tx.Query(`SELECT strlen(CAST(payload AS VARCHAR)) FROM otlp_envelopes WHERE signal='metrics' LIMIT ?`, metricEnvelopeLimit+1)
 	if err != nil {
-		return nil, fmt.Errorf("querying metric envelope metadata: %w", err)
+		return metricEnvelopeSize{}, fmt.Errorf("querying metric envelope metadata: %w", err)
 	}
 	defer rows.Close()
-	var pages [][]metricEnvelopeRef
-	var count, total, pageBytes int
+	var size metricEnvelopeSize
 	for rows.Next() {
-		var ref metricEnvelopeRef
-		if err := rows.Scan(&ref.id, &ref.size); err != nil {
-			return nil, err
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			return size, err
 		}
-		count++
-		if count > metricEnvelopeLimit {
-			return nil, fmt.Errorf("indeterminate: metric envelope scan limit exceeded")
+		size.count++
+		if size.count > metricEnvelopeLimit {
+			return size, fmt.Errorf("indeterminate: metric envelope scan limit exceeded")
 		}
-		if ref.size < 0 || ref.size > metricEnvelopeByteLimit {
-			return nil, fmt.Errorf("indeterminate: metric envelope size limit exceeded")
+		if n < 0 || n > metricEnvelopeByteLimit {
+			return size, fmt.Errorf("indeterminate: metric envelope size limit exceeded")
 		}
-		total += ref.size
-		if total > metricTotalByteLimit {
-			return nil, fmt.Errorf("indeterminate: metric scan byte limit exceeded")
+		size.bytes += n
+		if size.bytes > metricTotalByteLimit {
+			return size, fmt.Errorf("indeterminate: metric scan byte limit exceeded")
 		}
-		if len(pages) == 0 || len(pages[len(pages)-1]) >= metricPageRowLimit || pageBytes+ref.size > metricPageByteLimit {
-			pages = append(pages, []metricEnvelopeRef{})
-			pageBytes = 0
-		}
-		pages[len(pages)-1] = append(pages[len(pages)-1], ref)
-		pageBytes += ref.size
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return pages, nil
+	return size, rows.Err()
 }
 
-func visitMetricPage(tx *sql.Tx, refs []metricEnvelopeRef, visit func([]byte) error) error {
-	placeholders := make([]string, len(refs))
-	args := make([]any, len(refs))
-	sizes := make(map[int64]int, len(refs))
-	for i, ref := range refs {
-		placeholders[i] = "?"
-		args[i] = ref.id
-		sizes[ref.id] = ref.size
-	}
-	rows, err := tx.Query(`SELECT rowid, CAST(payload AS VARCHAR) FROM otlp_envelopes WHERE signal='metrics' AND rowid IN (`+strings.Join(placeholders, ",")+`) ORDER BY rowid`, args...)
+func visitMetricEnvelopes(tx *sql.Tx, expected metricEnvelopeSize, visit func([]byte) error) error {
+	rows, err := tx.Query(`SELECT CAST(payload AS VARCHAR) FROM otlp_envelopes WHERE signal='metrics'`)
 	if err != nil {
-		return fmt.Errorf("querying metric envelope page: %w", err)
+		return fmt.Errorf("querying metric envelopes: %w", err)
 	}
 	defer rows.Close()
-	seen := 0
+	var actual metricEnvelopeSize
 	for rows.Next() {
-		var id int64
 		var raw string
-		if err := rows.Scan(&id, &raw); err != nil {
+		if err := rows.Scan(&raw); err != nil {
 			return err
 		}
-		expected, ok := sizes[id]
-		if !ok || len(raw) != expected {
+		actual.count++
+		actual.bytes += len(raw)
+		if actual.count > expected.count || actual.bytes > expected.bytes || len(raw) > metricEnvelopeByteLimit {
 			return fmt.Errorf("indeterminate: metric envelope changed during scan")
 		}
-		delete(sizes, id)
-		seen++
 		if err := visit([]byte(raw)); err != nil {
 			return err
 		}
@@ -85,8 +60,8 @@ func visitMetricPage(tx *sql.Tx, refs []metricEnvelopeRef, visit func([]byte) er
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if seen != len(refs) {
-		return fmt.Errorf("indeterminate: metric envelope missing during scan")
+	if actual != expected {
+		return fmt.Errorf("indeterminate: metric envelope changed during scan")
 	}
 	return nil
 }
