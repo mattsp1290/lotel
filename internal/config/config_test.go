@@ -100,3 +100,36 @@ func TestDataPath(t *testing.T) {
 		t.Errorf("DataPath = %q, want %q", dp, expected)
 	}
 }
+
+func TestExplicitConfigPreservesSelection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	project := t.TempDir()
+	custom := filepath.Join(project, "custom.yaml")
+	if err := os.WriteFile(custom, []byte("custom config\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, _, err := ResolvePathsWithConfig(custom)
+	if err != nil || path != custom {
+		t.Fatalf("path=%q err=%v", path, err)
+	}
+	got, _ := os.ReadFile(custom)
+	if string(got) != "custom config\n" {
+		t.Fatal("custom config modified")
+	}
+	managed := filepath.Join(home, LotelDir, DefaultConfigName)
+	if err := os.WriteFile(managed, []byte("# lotel-managed-config v1\nold\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, _, err = ResolvePathsWithConfig(managed)
+	if err != nil || path != managed {
+		t.Fatalf("path=%q err=%v", path, err)
+	}
+	got, _ = os.ReadFile(managed)
+	if string(got) != DefaultConfig {
+		t.Fatal("managed defaults did not refresh")
+	}
+	if _, _, err = ResolvePathsWithConfig(filepath.Join(project, "missing.yaml")); err == nil {
+		t.Fatal("missing explicit config accepted")
+	}
+}

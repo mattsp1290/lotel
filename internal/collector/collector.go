@@ -28,6 +28,7 @@ type State struct {
 
 // Status represents the current status of the collector.
 type Status struct {
+	ConfigPath    string `json:"config_path,omitempty"`
 	Running       bool   `json:"running"`
 	ContainerID   string `json:"container_id,omitempty"`
 	ContainerName string `json:"container_name,omitempty"`
@@ -63,6 +64,10 @@ func readState() (*State, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readStateFile(path)
+}
+
+func readStateFile(path string) (*State, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -127,6 +132,53 @@ func isContainerRunning() bool {
 func containerExists() bool {
 	err := exec.Command("docker", "inspect", containerName).Run()
 	return err == nil
+}
+
+func InspectForUpgrade(ctx context.Context) (*Status, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	docker, err := findDocker()
+	if err != nil {
+		return nil, err
+	}
+	list := exec.CommandContext(ctx, docker, "ps", "--all", "--filter", "name=^/"+containerName+"$", "--format", "{{.ID}}")
+	list.WaitDelay = time.Second
+	out, err := list.Output()
+	if err != nil {
+		return nil, fmt.Errorf("inspect Collector container list: %w", err)
+	}
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return &Status{}, nil
+	}
+	if len(ids) != 1 || len(ids[0]) < 12 || len(ids[0]) > 64 || strings.Trim(ids[0], "0123456789abcdef") != "" {
+		return nil, fmt.Errorf("Docker returned an invalid Collector container ID")
+	}
+	inspect := exec.CommandContext(ctx, docker, "inspect", "--format", "{{.State.Running}}", ids[0])
+	inspect.WaitDelay = time.Second
+	out, err = inspect.Output()
+	if err != nil {
+		return nil, fmt.Errorf("inspect Collector running state: %w", err)
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "false":
+		return &Status{}, nil
+	case "true":
+	default:
+		return nil, fmt.Errorf("Docker returned an invalid Collector running state")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	state, err := readStateFile(filepath.Join(home, stateDir, stateFile))
+	if err != nil {
+		return nil, err
+	}
+	if state == nil || state.ConfigPath == "" {
+		return nil, fmt.Errorf("running Collector has no recorded config path; restart it with lotel before upgrading")
+	}
+	return &Status{Running: true, ConfigPath: state.ConfigPath}, nil
 }
 
 // Start launches the collector as a Docker container.
@@ -273,6 +325,7 @@ func GetStatus(ctx context.Context) (*Status, error) {
 		status.ContainerID = state.ContainerID
 		status.ContainerName = state.ContainerName
 		status.Image = state.Image
+		status.ConfigPath = state.ConfigPath
 		status.Uptime = time.Since(state.StartedAt).Truncate(time.Second).String()
 	} else {
 		status.ContainerName = containerName
