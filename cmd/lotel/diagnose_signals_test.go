@@ -16,6 +16,9 @@ import (
 
 func TestDiagnoseSignalsCLI(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "lotel")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", binary, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v: %s", err, out)
@@ -23,7 +26,7 @@ func TestDiagnoseSignalsCLI(t *testing.T) {
 	home := t.TempDir()
 	invoke := func(args ...string) ([]byte, error) {
 		c := exec.Command(binary, args...)
-		c.Env = append(os.Environ(), "HOME="+home)
+		c.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home)
 		return c.CombinedOutput()
 	}
 	out, err := invoke("diagnose", "signals", "--service", "app", "--since", "1h")

@@ -125,7 +125,7 @@ func TestDiagnoseSignalsRejectsWALsCLI(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, binary, "diagnose", "signals", "--service", "app", "--since", "1h")
-			cmd.Env = append(os.Environ(), "HOME="+home)
+			cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("diagnose: %v: %s", err, out)
