@@ -3,18 +3,20 @@ package storage
 import (
 	"bytes"
 	"fmt"
+	"math"
+	"sort"
+
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	metricpb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"math"
-	"sort"
 )
 
 type metricSelection struct {
-	resourceAttrs  []*commonpb.KeyValue
-	scopeAttrs     []*commonpb.KeyValue
+	resourceAttrs  map[string][]byte
+	scopeAttrs     map[string][]byte
+	pointAttrs     map[string][]byte
 	scopeName      string
 	scopeVersion   string
 	resource       []byte
@@ -27,6 +29,9 @@ type metricSelection struct {
 }
 
 func canonicalAttrs(attrs []*commonpb.KeyValue, rejectNonfinite bool) error {
+	if len(attrs) > metricAttributeLimit {
+		return fmt.Errorf("attribute count limit exceeded")
+	}
 	seen := make(map[string]bool, len(attrs))
 	for _, kv := range attrs {
 		if kv == nil || kv.Key == "" || kv.KeyStrindex != 0 || kv.Value == nil || seen[kv.Key] {
@@ -118,7 +123,7 @@ func canonicalPoint(attrs []*commonpb.KeyValue, rejectNonfinite bool) ([]byte, e
 }
 func decodeMetricEnvelope(data []byte) (*metricpb.MetricsData, error) {
 	m := &metricpb.MetricsData{}
-	if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(data, m); err != nil {
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: false, RecursionLimit: metricJSONRecursionLimit}).Unmarshal(data, m); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -158,11 +163,24 @@ func parseMetricSelection(data []byte) (metricSelection, error) {
 		return id, err
 	}
 	id.resourceSchema, id.scopeSchema, id.name, id.unit = r.SchemaUrl, s.SchemaUrl, metric.Name, metric.Unit
+	var resourceAttrs []*commonpb.KeyValue
 	if r.Resource != nil {
-		id.resourceAttrs = r.Resource.Attributes
+		resourceAttrs = r.Resource.Attributes
+	}
+	id.resourceAttrs, err = canonicalAttributeMap(resourceAttrs)
+	if err != nil {
+		return id, err
 	}
 	if s.Scope != nil {
-		id.scopeName, id.scopeVersion, id.scopeAttrs = s.Scope.Name, s.Scope.Version, s.Scope.Attributes
+		id.scopeName, id.scopeVersion = s.Scope.Name, s.Scope.Version
+		id.scopeAttrs, err = canonicalAttributeMap(s.Scope.Attributes)
+		if err != nil {
+			return id, err
+		}
+	}
+	id.pointAttrs, err = canonicalAttributeMap(sum.DataPoints[0].Attributes)
+	if err != nil {
+		return id, err
 	}
 	return id, nil
 }
@@ -172,21 +190,23 @@ func ValidateMetricSelector(data []byte) error {
 	return err
 }
 
-func knownAttributesDisjoint(candidate, selected []*commonpb.KeyValue) bool {
-	selectedByKey := make(map[string][]byte, len(selected))
-	for _, kv := range selected {
-		if kv == nil {
-			continue
-		}
+func canonicalAttributeMap(attrs []*commonpb.KeyValue) (map[string][]byte, error) {
+	result := make(map[string][]byte, len(attrs))
+	for _, kv := range attrs {
 		clone := proto.Clone(kv).(*commonpb.KeyValue)
-		if canonicalAttrs([]*commonpb.KeyValue{clone}, false) != nil {
-			continue
+		if err := canonicalAttrs([]*commonpb.KeyValue{clone}, true); err != nil {
+			return nil, err
 		}
 		value, err := encodedIdentity(clone)
-		if err == nil {
-			selectedByKey[kv.Key] = value
+		if err != nil {
+			return nil, err
 		}
+		result[kv.Key] = value
 	}
+	return result, nil
+}
+
+func knownAttributesDisjoint(candidate []*commonpb.KeyValue, selectedByKey map[string][]byte) bool {
 	counts := make(map[string]int, len(candidate))
 	for _, kv := range candidate {
 		if kv != nil {

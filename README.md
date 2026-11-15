@@ -278,7 +278,7 @@ complete-window total. It assumes a single writer. Ingestion or retention can
 leave history incomplete, including missing resets or missing-value markers.
 Complete OTLP history may require a full backfill from retained raw files.
 The selector is limited to 4 MiB. The scan stops with an indeterminate error
-after 100,000 envelopes, 4,194,304 characters in one envelope, 64 MiB of
+after 100,000 envelopes, 4 MiB in one envelope, 64 MiB of
 envelope data, 100,000 matching points, or 128 MiB of candidate processing.
 
 ## Query options
