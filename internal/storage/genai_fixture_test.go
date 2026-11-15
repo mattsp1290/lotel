@@ -39,7 +39,7 @@ func TestIngestGenAIFixtures(t *testing.T) {
 	if report.Signals["traces"].Records != 4 || report.Signals["metrics"].Records != 6 || report.Signals["logs"].Records != 1 {
 		t.Fatalf("unexpected report %+v", report)
 	}
-	traces, err := QueryTraces(db, QueryOptions{})
+	traces, err := QueryTraces(db, TraceQueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

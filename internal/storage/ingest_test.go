@@ -26,7 +26,7 @@ func TestIngestAndQueryRoundtrip(t *testing.T) {
 	}
 
 	// Verify traces.
-	traces, err := QueryTraces(db, QueryOptions{Service: "test-uuid-svc"})
+	traces, err := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Service: "test-uuid-svc"}})
 	if err != nil {
 		t.Fatalf("QueryTraces: %v", err)
 	}
@@ -68,22 +68,22 @@ func TestIngestAndQueryRoundtrip(t *testing.T) {
 	}
 
 	// Verify service filter excludes non-matching.
-	traces2, _ := QueryTraces(db, QueryOptions{Service: "nonexistent"})
+	traces2, _ := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Service: "nonexistent"}})
 	if len(traces2) != 0 {
 		t.Errorf("expected 0 traces for nonexistent service, got %d", len(traces2))
 	}
 
 	// Verify time range filter.
-	traces3, _ := QueryTraces(db, QueryOptions{
+	traces3, _ := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{
 		Service: "test-uuid-svc",
 		Since:   time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}})
 	if len(traces3) != 0 {
 		t.Errorf("expected 0 traces in future range, got %d", len(traces3))
 	}
 
 	// Verify limit.
-	traces4, _ := QueryTraces(db, QueryOptions{Service: "test-uuid-svc", Limit: 1})
+	traces4, _ := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Service: "test-uuid-svc", Limit: 1}})
 	if len(traces4) != 1 {
 		t.Errorf("expected 1 trace with limit=1, got %d", len(traces4))
 	}
@@ -106,7 +106,7 @@ func TestIngestAndQueryRoundtrip(t *testing.T) {
 	}
 
 	// Verify deletion.
-	tracesPost, _ := QueryTraces(db, QueryOptions{})
+	tracesPost, _ := QueryTraces(db, TraceQueryOptions{})
 	metricsPost, _ := QueryMetrics(db, QueryOptions{})
 	logsPost, _ := QueryLogs(db, QueryOptions{})
 	if len(tracesPost) != 0 || len(metricsPost) != 0 || len(logsPost) != 0 {
@@ -138,7 +138,7 @@ func TestIngestIdempotent(t *testing.T) {
 			}
 		}
 	}
-	traces, err := QueryTraces(db, QueryOptions{Service: "test-uuid-svc"})
+	traces, err := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Service: "test-uuid-svc"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestQueryEmptyDB(t *testing.T) {
 	}
 	defer db.Close()
 
-	traces, err := QueryTraces(db, QueryOptions{Service: "nobody"})
+	traces, err := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Service: "nobody"}})
 	if err != nil {
 		t.Fatalf("QueryTraces on empty: %v", err)
 	}

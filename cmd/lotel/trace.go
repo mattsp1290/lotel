@@ -43,7 +43,7 @@ func traceCommand() *cobra.Command {
 			}
 			defer tx.Rollback()
 			opts := storage.QueryOptions{TraceID: args[0]}
-			spans, err := storage.QueryTraces(tx, opts)
+			spans, err := storage.QueryTraces(tx, storage.TraceQueryOptions{QueryOptions: opts})
 			if err != nil {
 				return err
 			}

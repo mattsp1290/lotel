@@ -31,7 +31,7 @@ func TestQueryLargeIntegerPrecision(t *testing.T) {
 	if _, err := db.Exec("UPDATE metrics SET attributes=?,resource_attributes=?", resource, resource); err != nil {
 		t.Fatal(err)
 	}
-	traces, err := QueryTraces(db, QueryOptions{})
+	traces, err := QueryTraces(db, TraceQueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

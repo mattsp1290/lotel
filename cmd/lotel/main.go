@@ -162,20 +162,21 @@ func main() {
 			if err != nil {
 				return err
 			}
-			opts.SpanErrorsOnly, _ = cmd.Flags().GetBool("errors-only")
+			traceOpts := storage.TraceQueryOptions{QueryOptions: opts}
+			traceOpts.ErrorsOnly, _ = cmd.Flags().GetBool("errors-only")
 			if cmd.Flags().Changed("min-duration") {
 				duration, _ := cmd.Flags().GetDuration("min-duration")
 				if duration < 0 {
 					return fmt.Errorf("--min-duration must be nonnegative")
 				}
-				opts.MinDuration = &duration
+				traceOpts.MinDuration = &duration
 			}
 			db, err := openDB()
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			results, err := storage.QueryTraces(db, opts)
+			results, err := storage.QueryTraces(db, traceOpts)
 			if err != nil {
 				return err
 			}
