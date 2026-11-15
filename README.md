@@ -206,6 +206,7 @@ lotel --version
 | `lotel assert signal` | Fail if a service has no indexed signal in a time window |
 | `lotel query traces` | Query traces (JSON output) |
 | `lotel query span-stats` | Summarize observed spans by service, name, and kind |
+| `lotel query log-stats` | Summarize observed logs by service and severity |
 | `lotel query services` | List observed services and their signals |
 | `lotel query operations` | List observed span names and kinds |
 | `lotel query trace <trace-id>` | Query a trace and its correlated logs (JSON output) |
@@ -267,7 +268,7 @@ Additional filters:
 | `--name` | `traces` (span name), `metrics` (metric name) |
 | `--trace-id` | `traces`, `logs`, `genai calls`, `genai usage` |
 | `--errors-only`, `--min-duration` | `traces` |
-| `--min-severity`, `--body-contains` | `logs` |
+| `--min-severity`, `--body-contains` | `logs`, `log-stats` |
 | `--event-name` | `logs` |
 | `--attr key=value` | `traces`, `metrics`, `logs`; repeat to require all matches |
 | `--model`, `--provider`, `--operation`, `--conversation-id`, `--errors-only` | Both GenAI commands |
@@ -317,6 +318,20 @@ timestamps from the percentile samples. `duration_count` and
 Percentiles are null when no durations qualify. The report counts projected
 records, including duplicates. Sampling and missing telemetry mean the counts
 are local observations, not traffic estimates.
+
+`lotel query log-stats --since 15m` groups projected logs by service and
+OpenTelemetry severity band. The required start accepts a positive duration or
+an RFC3339 timestamp. The inclusive end defaults to the query time, and an
+explicit `--until` cannot be in the future. Bounds match projected log
+timestamps at microsecond precision. Log ingestion uses the observed timestamp
+when the event timestamp is absent and skips records with neither timestamp.
+
+Groups are sorted by service and severity: `unspecified`, `trace`, `debug`,
+`info`, `warn`, `error`, `fatal`, then `invalid`. Severity zero is unspecified;
+null and out-of-range numbers are invalid. Severity text does not set the band.
+The severity and body filters apply before grouping, and `--limit` applies to
+the sorted groups. Counts include duplicate projected records. Sampling and
+missing telemetry mean the counts are local observations, not traffic estimates.
 
 `lotel query trace <trace-id>` returns one object with `trace_id`, `spans`, and
 `logs` arrays for all services and times. The ID must be 32 hexadecimal
