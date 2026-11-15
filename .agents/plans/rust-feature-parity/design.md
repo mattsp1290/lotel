@@ -10,7 +10,7 @@ Rust commit `77270b2971422571434b2dc77e38581b1da89618` implements three missing 
 - An initial ingestion pass and periodic passes make JSONL queryable automatically.
 - `ingest --full` rereads retained JSONL instead of resuming cursors.
 
-The Go CLI already provides queries, aggregation, retention, and broader GenAI and attribute filters. The separate collector-data-parity branch owns profiles storage and complete OTLP queries. This branch does not copy that unfinished work.
+The Go CLI already provides queries, aggregation, retention, and broader GenAI and attribute filters. The collector-data-parity work subsequently landed in main. This branch integrates its profiles storage and complete OTLP queries, including atomic full rebuilding of all four signals and their envelopes.
 
 ## Alternatives
 
