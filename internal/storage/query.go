@@ -30,6 +30,31 @@ type TraceQueryOptions struct {
 	MinDuration *time.Duration
 }
 
+var logSeverities = map[string]int{"trace": 1, "debug": 5, "info": 9, "warn": 13, "error": 17, "fatal": 21}
+
+func ParseLogSeverity(name string) (int, bool) {
+	severity, ok := logSeverities[name]
+	return severity, ok
+}
+
+func validLogSeverity(severity int) bool {
+	if severity == 0 {
+		return true
+	}
+	for _, value := range logSeverities {
+		if severity == value {
+			return true
+		}
+	}
+	return false
+}
+
+type LogQueryOptions struct {
+	QueryOptions
+	MinSeverity  int
+	BodyContains *string
+}
+
 type queryer interface {
 	Query(string, ...any) (*sql.Rows, error)
 }
@@ -227,13 +252,27 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 }
 
 // QueryLogs returns logs matching the given options.
-func QueryLogs(db queryer, opts QueryOptions) ([]LogResult, error) {
-	if err := validateQueryOptions(opts); err != nil {
+func QueryLogs(db queryer, opts LogQueryOptions) ([]LogResult, error) {
+	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
+	if !validLogSeverity(opts.MinSeverity) {
+		return nil, fmt.Errorf("invalid minimum severity")
+	}
+	if opts.BodyContains != nil && *opts.BodyContains == "" {
+		return nil, fmt.Errorf("body search cannot be empty")
+	}
 	query := `SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR), CAST(json_object('observed_timestamp',strftime("observed_timestamp", '%Y-%m-%dT%H:%M:%S.%fZ'),'event_name',"event_name",'body_value',body_json,'flags',"flags",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version") AS VARCHAR) FROM logs WHERE 1=1`
-	args := buildWhere(&query, opts, "timestamp")
-	args = append(args, buildFilters(&query, opts, "")...)
+	args := buildWhere(&query, opts.QueryOptions, "timestamp")
+	args = append(args, buildFilters(&query, opts.QueryOptions, "")...)
+	if opts.MinSeverity != 0 {
+		query += " AND severity_number BETWEEN ? AND 24"
+		args = append(args, opts.MinSeverity)
+	}
+	if opts.BodyContains != nil {
+		query += " AND contains(lower(body), lower(?))"
+		args = append(args, *opts.BodyContains)
+	}
 
 	query += " ORDER BY timestamp ASC"
 	if opts.Limit > 0 {

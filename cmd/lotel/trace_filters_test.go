@@ -12,8 +12,8 @@ import (
 	"github.com/mattsp1290/lotel/internal/storage"
 )
 
-func TestTraceFiltersHelper(t *testing.T) {
-	if os.Getenv("LOTEL_FILTERS_HELPER") != "1" {
+func TestCLIHelper(t *testing.T) {
+	if os.Getenv("LOTEL_CLI_HELPER") != "1" {
 		return
 	}
 	for i, arg := range os.Args {
@@ -61,8 +61,8 @@ func TestTraceFiltersCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	invoke := func(home string, args ...string) ([]storage.TraceResult, string, error) {
-		cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestTraceFiltersHelper$", "--", "query", "traces"}, args...)...)
-		cmd.Env = append(os.Environ(), "HOME="+home, "LOTEL_FILTERS_HELPER=1")
+		cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestCLIHelper$", "--", "query", "traces"}, args...)...)
+		cmd.Env = append(os.Environ(), "HOME="+home, "LOTEL_CLI_HELPER=1")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return nil, string(output), err

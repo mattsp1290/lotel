@@ -47,7 +47,7 @@ func traceCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			logs, err := storage.QueryLogs(tx, opts)
+			logs, err := storage.QueryLogs(tx, storage.LogQueryOptions{QueryOptions: opts})
 			if err != nil {
 				return err
 			}
