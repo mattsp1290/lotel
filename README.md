@@ -203,6 +203,7 @@ lotel --version
 | `lotel ingest` | Incrementally ingest new JSONL telemetry (JSON report) |
 | `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
 | `lotel query traces` | Query traces (JSON output) |
+| `lotel query trace <trace-id>` | Query a trace and its correlated logs (JSON output) |
 | `lotel query metrics` | Query metrics (JSON output) |
 | `lotel query logs` | Query logs (JSON output) |
 | `lotel query profiles` | Query complete OTLP profile resource envelopes |
@@ -214,7 +215,7 @@ lotel --version
 
 ## Query options
 
-All query commands support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`:
+All query commands except `query trace` support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`:
 
 ```
 --service     Filter by service.name
@@ -245,6 +246,14 @@ Usage defaults to grouping by provider, model, and operation. It reports token
 totals, calls with missing usage, errors, and nearest-rank latency percentiles.
 For cumulative histograms, read the latest `query metrics --name <name>` point.
 `query aggregate` aggregates per-point sums without correcting cumulative temporality.
+
+`lotel query trace <trace-id>` returns one object with `trace_id`, `spans`, and
+`logs` arrays for all services and times. The ID must be 32 hexadecimal
+characters and nonzero. Parent and log relationships use the existing span IDs.
+The output retains duplicate spans and logs with missing or unknown span IDs.
+Empty arrays mean no matching projected records were found. As with other
+convenience queries, the projections can omit fields or records. Use `query otlp`
+for complete retained OTLP envelopes.
 
 ### Complete telemetry data
 

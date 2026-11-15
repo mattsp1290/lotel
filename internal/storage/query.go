@@ -24,6 +24,10 @@ type QueryOptions struct {
 	Limit     int
 }
 
+type queryer interface {
+	Query(string, ...any) (*sql.Rows, error)
+}
+
 // TraceResult represents a single span in query results.
 type TraceResult struct {
 	TraceState         string         `json:"trace_state,omitempty"`
@@ -106,7 +110,7 @@ type MetricAggregation struct {
 }
 
 // QueryTraces returns traces matching the given options.
-func QueryTraces(db *sql.DB, opts QueryOptions) ([]TraceResult, error) {
+func QueryTraces(db queryer, opts QueryOptions) ([]TraceResult, error) {
 	if err := validateQueryOptions(opts); err != nil {
 		return nil, err
 	}
@@ -206,7 +210,7 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 }
 
 // QueryLogs returns logs matching the given options.
-func QueryLogs(db *sql.DB, opts QueryOptions) ([]LogResult, error) {
+func QueryLogs(db queryer, opts QueryOptions) ([]LogResult, error) {
 	if err := validateQueryOptions(opts); err != nil {
 		return nil, err
 	}
