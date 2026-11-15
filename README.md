@@ -195,6 +195,7 @@ lotel --version
 | Command | Description |
 |---------|-------------|
 | `lotel --version` | Show the executable version |
+| `lotel commands` | List registered commands and flags as JSON |
 | `lotel upgrade [--check] [--json] [--version vX.Y.Z]` | Check for or install a release |
 | `lotel start [--wait] [--config <path>]` | Start the Docker Collector and automatic ingestion |
 | `lotel start --backend native [--wait]` | Start the bundled Collector without Docker, with automatic ingestion |
@@ -203,7 +204,13 @@ lotel --version
 | `lotel health` | Check collector health (exit 0/1) |
 | `lotel ingest` | Incrementally ingest new JSONL telemetry (JSON report) |
 | `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
+| `lotel assert signal` | Fail if a service has no indexed signal in a time window |
 | `lotel query traces` | Query traces (JSON output) |
+| `lotel query span-stats` | Summarize observed spans by service, name, and kind |
+| `lotel query log-stats` | Summarize observed logs by service and severity |
+| `lotel query services` | List observed services and their signals |
+| `lotel query operations` | List observed span names and kinds |
+| `lotel query trace <trace-id>` | Query a trace and its correlated logs (JSON output) |
 | `lotel query metrics` | Query metrics (JSON output) |
 | `lotel query logs` | Query logs (JSON output) |
 | `lotel query profiles` | Query complete OTLP profile resource envelopes |
@@ -213,9 +220,34 @@ lotel --version
 | `lotel query aggregate` | Compute avg/min/max for a metric |
 | `lotel prune` | Delete telemetry older than threshold |
 
+`lotel commands` returns a versioned catalog of registered visible commands and
+their visible flags. Each entry includes its path, usage text, summary, whether
+it can run, and its flags. Flag defaults are strings as shown by the CLI, and
+`inherited` identifies flags inherited from a parent command. The catalog
+excludes Cobra's automatically generated help and completion commands and flags.
+The set of commands and their defaults can change between lotel versions.
+
+The catalog does not describe all required arguments, validation rules, result
+schemas, or exit codes. Use the command's help and documentation for those.
+
+## Assert signal evidence
+
+Use `lotel assert signal --signal traces --service my-app --since 10m` to
+check for an indexed record. Select `traces`, `metrics`, or `logs` with
+`--signal`. The `--since` value is a positive duration or an RFC3339 timestamp.
+`--until` accepts an RFC3339 timestamp and defaults to now. Both bounds are
+inclusive. The command rejects future end times.
+
+The command returns JSON with the resolved window, `passed`, and, when a
+record matches, `latest_timestamp`. It exits 0 for a match and 1 for no match
+or an error. A missing match means no projected record is indexed in the
+window. It does not prove the application or Collector failed. Allow time for
+export and ingestion, and use `lotel status` and `lotel health` for collection
+status. Historical assertions do not require a running Collector.
+
 ## Query options
 
-All query commands support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`:
+All query commands except `query trace` support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`:
 
 ```
 --service     Filter by service.name
@@ -224,12 +256,20 @@ All query commands support `--service`, `--since`, and `--until`. Generic querie
 --limit       Max results
 ```
 
+Service discovery lists services observed in projected traces, metrics, and logs.
+It does not include profile-only services or establish whether a service is running.
+Operation discovery lists distinct projected span names and kinds by service. Both
+commands filter the observation window before grouping and apply the limit after
+sorting. Missing service names appear as `unknown`; empty names remain empty.
+
 Additional filters:
 
 | Flag | Commands |
 | --- | --- |
 | `--name` | `traces` (span name), `metrics` (metric name) |
 | `--trace-id` | `traces`, `logs`, `genai calls`, `genai usage` |
+| `--errors-only`, `--min-duration` | `traces` |
+| `--min-severity`, `--body-contains` | `logs`, `log-stats` |
 | `--event-name` | `logs` |
 | `--attr key=value` | `traces`, `metrics`, `logs`; repeat to require all matches |
 | `--model`, `--provider`, `--operation`, `--conversation-id`, `--errors-only` | Both GenAI commands |
@@ -241,11 +281,81 @@ Attribute filters compare the compact JSON string form. An integer 12 matches
 A double 1e21 matches `key=1e21`. Null and missing values never match.
 Structured values match their compact JSON text.
 
+For traces, `--errors-only` matches the OpenTelemetry span status ERROR. It does
+not infer errors from HTTP status or exceptions. `--min-duration` accepts a
+nonnegative Go duration such as `100ms` and includes spans at the threshold.
+It compares the projected nanosecond duration. Spans with missing timestamps
+have a projected duration of zero.
+
+For logs, `--min-severity` accepts `trace`, `debug`, `info`, `warn`, `error`,
+or `fatal`. It compares the OpenTelemetry severity number and excludes
+unspecified and out-of-range values. `--body-contains` performs a literal,
+case-insensitive substring match on projected body text using DuckDB lowercase
+conversion. This is not full Unicode case folding. Structured bodies appear as
+JSON text, so keys and JSON syntax can match. This is not a typed field search.
+The substring must not be empty.
+
 Generic queries order oldest first. `genai calls` orders newest first.
 Usage defaults to grouping by provider, model, and operation. It reports token
 totals, calls with missing usage, errors, and nearest-rank latency percentiles.
 For cumulative histograms, read the latest `query metrics --name <name>` point.
 `query aggregate` aggregates per-point sums without correcting cumulative temporality.
+
+`lotel query span-stats --since 15m` groups projected spans by service, name,
+and span kind. The start is required and can be a positive duration or an RFC3339
+timestamp. The end defaults to the time of the query; `--until` accepts an
+RFC3339 timestamp no later than that time. Both bounds are inclusive and match
+the projected span start time, which is stored at microsecond precision. For
+example, a span starting at `12:00:00.0000002` is stored at `12:00:00.000000`
+and does not match a window starting at `12:00:00.0000002`. `--service` filters
+before grouping, and `--limit` limits the sorted groups after aggregation.
+
+Each group reports the number of spans, the number with OpenTelemetry ERROR
+status, and their error rate over all spans in the group, including spans with
+unset status. Duration percentiles use nearest-rank observed nanosecond values.
+The report excludes negative durations and spans with missing start or end
+timestamps from the percentile samples. `duration_count` and
+`duration_excluded` show how many matched spans were included and excluded.
+Percentiles are null when no durations qualify. The report counts projected
+records, including duplicates. Sampling and missing telemetry mean the counts
+are local observations, not traffic estimates.
+
+`lotel query log-stats --since 15m` groups projected logs by service and
+OpenTelemetry severity band. The required start accepts a positive duration or
+an RFC3339 timestamp. The inclusive end defaults to the query time, and an
+explicit `--until` cannot be in the future. Bounds match projected log
+timestamps at microsecond precision. Log ingestion uses the observed timestamp
+when the event timestamp is absent and skips records with neither timestamp.
+
+Groups are sorted by service and severity: `unspecified`, `trace`, `debug`,
+`info`, `warn`, `error`, `fatal`, then `invalid`. Severity zero is unspecified;
+null and out-of-range numbers are invalid. Severity text does not set the band.
+The severity and body filters apply before grouping, and `--limit` applies to
+the sorted groups. Counts include duplicate projected records. Sampling and
+missing telemetry mean the counts are local observations, not traffic estimates.
+
+`lotel query trace <trace-id>` returns one object with `trace_id`, `spans`, and
+`logs` arrays for all services and times. The ID must be 32 hexadecimal
+characters and nonzero. Parent and log relationships use the existing span IDs.
+The output retains duplicate spans and logs with missing or unknown span IDs.
+Empty arrays mean no matching projected records were found. As with other
+convenience queries, the projections can omit fields or records. Use `query otlp`
+for complete retained OTLP envelopes.
+
+Add `--relationships` to resolve span parents and log span IDs within the
+returned bundle. The command sorts spans and logs by timestamp and then by
+their complete projected JSON before assigning zero-based array indices.
+Identical records remain separate and their indices are interchangeable.
+Indices can change when the stored records change.
+
+The `relationships.span_parents` and `relationships.log_spans` arrays align
+with the returned spans and logs. Each entry has a `state`. A `linked` entry
+contains one index in `span_indices`; an `ambiguous` entry contains every
+matching index. `missing` means no matching span was found. `invalid` means
+the referenced ID is malformed or zero. An empty parent is `root`; an empty
+log span ID is `unscoped`. `cycle_span_indices` lists spans that form a cycle
+through uniquely resolved parents. Relationships follow recorded IDs and do
+not prove causality or a complete trace.
 
 ### Complete telemetry data
 

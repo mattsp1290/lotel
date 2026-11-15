@@ -24,6 +24,64 @@ type QueryOptions struct {
 	Limit     int
 }
 
+type TraceQueryOptions struct {
+	QueryOptions
+	ErrorsOnly  bool
+	MinDuration *time.Duration
+}
+
+var logSeverities = map[string]int{"trace": 1, "debug": 5, "info": 9, "warn": 13, "error": 17, "fatal": 21}
+
+func ParseLogSeverity(name string) (int, bool) {
+	severity, ok := logSeverities[name]
+	return severity, ok
+}
+
+func validLogSeverity(severity int) bool {
+	if severity == 0 {
+		return true
+	}
+	for _, value := range logSeverities {
+		if severity == value {
+			return true
+		}
+	}
+	return false
+}
+
+type LogQueryOptions struct {
+	QueryOptions
+	MinSeverity  int
+	BodyContains *string
+}
+
+func validateLogFilters(severity int, body *string) error {
+	if !validLogSeverity(severity) {
+		return fmt.Errorf("invalid minimum severity")
+	}
+	if body != nil && *body == "" {
+		return fmt.Errorf("body search cannot be empty")
+	}
+	return nil
+}
+
+func appendLogFilters(query *string, severity int, body *string) []any {
+	var args []any
+	if severity != 0 {
+		*query += " AND severity_number BETWEEN ? AND 24"
+		args = append(args, severity)
+	}
+	if body != nil {
+		*query += " AND contains(lower(body), lower(?))"
+		args = append(args, *body)
+	}
+	return args
+}
+
+type queryer interface {
+	Query(string, ...any) (*sql.Rows, error)
+}
+
 // TraceResult represents a single span in query results.
 type TraceResult struct {
 	TraceState         string         `json:"trace_state,omitempty"`
@@ -106,13 +164,24 @@ type MetricAggregation struct {
 }
 
 // QueryTraces returns traces matching the given options.
-func QueryTraces(db *sql.DB, opts QueryOptions) ([]TraceResult, error) {
-	if err := validateQueryOptions(opts); err != nil {
+func QueryTraces(db queryer, opts TraceQueryOptions) ([]TraceResult, error) {
+	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
+	if opts.MinDuration != nil && *opts.MinDuration < 0 {
+		return nil, fmt.Errorf("minimum duration must be nonnegative")
+	}
 	query := `SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR), CAST(json_object('trace_state',"trace_state",'status_message',"status_message",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version",'schema_url',"schema_url",'events',"events",'links',"links") AS VARCHAR) FROM traces WHERE 1=1`
-	args := buildWhere(&query, opts, "start_time")
-	args = append(args, buildFilters(&query, opts, "name")...)
+	args := buildWhere(&query, opts.QueryOptions, "start_time")
+	args = append(args, buildFilters(&query, opts.QueryOptions, "name")...)
+	if opts.ErrorsOnly {
+		query += " AND status_code = ?"
+		args = append(args, 2)
+	}
+	if opts.MinDuration != nil {
+		query += " AND duration_ns >= ?"
+		args = append(args, int64(*opts.MinDuration))
+	}
 
 	query += " ORDER BY start_time ASC"
 	if opts.Limit > 0 {
@@ -206,13 +275,17 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 }
 
 // QueryLogs returns logs matching the given options.
-func QueryLogs(db *sql.DB, opts QueryOptions) ([]LogResult, error) {
-	if err := validateQueryOptions(opts); err != nil {
+func QueryLogs(db queryer, opts LogQueryOptions) ([]LogResult, error) {
+	if err := validateQueryOptions(opts.QueryOptions); err != nil {
+		return nil, err
+	}
+	if err := validateLogFilters(opts.MinSeverity, opts.BodyContains); err != nil {
 		return nil, err
 	}
 	query := `SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR), CAST(json_object('observed_timestamp',strftime("observed_timestamp", '%Y-%m-%dT%H:%M:%S.%fZ'),'event_name',"event_name",'body_value',body_json,'flags',"flags",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version") AS VARCHAR) FROM logs WHERE 1=1`
-	args := buildWhere(&query, opts, "timestamp")
-	args = append(args, buildFilters(&query, opts, "")...)
+	args := buildWhere(&query, opts.QueryOptions, "timestamp")
+	args = append(args, buildFilters(&query, opts.QueryOptions, "")...)
+	args = append(args, appendLogFilters(&query, opts.MinSeverity, opts.BodyContains)...)
 
 	query += " ORDER BY timestamp ASC"
 	if opts.Limit > 0 {
@@ -358,7 +431,7 @@ func buildFilters(query *string, opts QueryOptions, nameColumn string) []any {
 		args = append(args, opts.Name)
 	}
 	if opts.TraceID != "" {
-		*query += " AND trace_id = ?"
+		*query += " AND lower(trace_id) = ?"
 		args = append(args, strings.ToLower(opts.TraceID))
 	}
 	if opts.EventName != "" {

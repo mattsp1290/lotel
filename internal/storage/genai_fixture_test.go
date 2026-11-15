@@ -39,7 +39,7 @@ func TestIngestGenAIFixtures(t *testing.T) {
 	if report.Signals["traces"].Records != 4 || report.Signals["metrics"].Records != 6 || report.Signals["logs"].Records != 1 {
 		t.Fatalf("unexpected report %+v", report)
 	}
-	traces, err := QueryTraces(db, QueryOptions{})
+	traces, err := QueryTraces(db, TraceQueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestIngestGenAIFixtures(t *testing.T) {
 	if _, ok := traces[1].Attributes["gen_ai.output.messages"].([]any); !ok {
 		t.Fatal("structured content lost")
 	}
-	logs, err := QueryLogs(db, QueryOptions{})
+	logs, err := QueryLogs(db, LogQueryOptions{QueryOptions: QueryOptions{}})
 	if err != nil {
 		t.Fatal(err)
 	}

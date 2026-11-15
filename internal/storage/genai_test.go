@@ -59,14 +59,14 @@ func TestQueryFilters(t *testing.T) {
 	if _, err := IngestAll(db, path); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := QueryTraces(db, QueryOptions{Attrs: []AttrFilter{{Key: "gen_ai.usage.input_tokens", Value: "5"}, {Key: "gen_ai.provider.name", Value: "openai"}}})
+	rows, err := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Attrs: []AttrFilter{{Key: "gen_ai.usage.input_tokens", Value: "5"}, {Key: "gen_ai.provider.name", Value: "openai"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 1 {
 		t.Fatalf("attribute filters: %d", len(rows))
 	}
-	logs, err := QueryLogs(db, QueryOptions{EventName: "missing"})
+	logs, err := QueryLogs(db, LogQueryOptions{QueryOptions: QueryOptions{EventName: "missing"}})
 	if err != nil || len(logs) != 0 {
 		t.Fatalf("event filter: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestQueryFilters(t *testing.T) {
 	if err != nil || len(metrics) != 1 {
 		t.Fatalf("name filter: %v", err)
 	}
-	_, err = QueryTraces(db, QueryOptions{Attrs: []AttrFilter{{Key: "bad\n", Value: "x"}}})
+	_, err = QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Attrs: []AttrFilter{{Key: "bad\n", Value: "x"}}}})
 	if err == nil {
 		t.Fatal("control character accepted")
 	}
@@ -125,7 +125,7 @@ func TestQueryFiltersEscaping(t *testing.T) {
 	}{
 		{`dot."quote\slash`, "exact", 1}, {"integral", "1", 1}, {"integral", "1.0", 0}, {"large", "1e21", 1}, {"null", "null", 0},
 	} {
-		rows, err := QueryTraces(db, QueryOptions{Attrs: []AttrFilter{{Key: tc.key, Value: tc.value}}})
+		rows, err := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Attrs: []AttrFilter{{Key: tc.key, Value: tc.value}}}})
 		if err != nil || len(rows) != tc.want {
 			t.Fatalf("%q=%s: %d rows, %v", tc.key, tc.value, len(rows), err)
 		}

@@ -1,0 +1,74 @@
+package main
+
+import (
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/mattsp1290/lotel/internal/storage"
+	"github.com/spf13/cobra"
+)
+
+type traceBundle struct {
+	TraceID       string                `json:"trace_id"`
+	Spans         []storage.TraceResult `json:"spans"`
+	Logs          []storage.LogResult   `json:"logs"`
+	Relationships *traceRelationships   `json:"relationships,omitempty"`
+}
+
+func traceCommand() *cobra.Command {
+	var relationships bool
+	cmd := &cobra.Command{
+		Use:   "trace <trace-id>",
+		Short: "Query a trace and its correlated logs (JSON)",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if err := cobra.ExactArgs(1)(cmd, args); err != nil {
+				return err
+			}
+			id, err := hex.DecodeString(args[0])
+			if err != nil || len(id) != 16 || strings.Trim(args[0], "0") == "" {
+				return fmt.Errorf("trace ID must be 32 hexadecimal characters and nonzero")
+			}
+			args[0] = strings.ToLower(args[0])
+			return nil
+		},
+		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			opts := storage.QueryOptions{TraceID: args[0]}
+			spans, err := storage.QueryTraces(tx, storage.TraceQueryOptions{QueryOptions: opts})
+			if err != nil {
+				return err
+			}
+			logs, err := storage.QueryLogs(tx, storage.LogQueryOptions{QueryOptions: opts})
+			if err != nil {
+				return err
+			}
+			if spans == nil {
+				spans = []storage.TraceResult{}
+			}
+			if logs == nil {
+				logs = []storage.LogResult{}
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			bundle := traceBundle{TraceID: args[0], Spans: spans, Logs: logs}
+			if relationships {
+				if err := bundle.resolveRelationships(); err != nil {
+					return err
+				}
+			}
+			return encoder.Encode(bundle)
+		}),
+	}
+	cmd.Flags().BoolVar(&relationships, "relationships", false, "resolve span parents and log references")
+	return cmd
+}

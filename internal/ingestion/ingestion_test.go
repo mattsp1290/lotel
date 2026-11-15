@@ -61,7 +61,7 @@ func TestRunReleasesDatabaseForOtherProcesses(t *testing.T) {
 	for time.Now().Before(deadline) {
 		db, err := storage.OpenDB(filepath.Join(root, "lotel.db"))
 		if err == nil {
-			rows, queryErr := storage.QueryLogs(db, storage.QueryOptions{})
+			rows, queryErr := storage.QueryLogs(db, storage.LogQueryOptions{})
 			closeErr := db.Close()
 			if queryErr == nil && closeErr == nil && len(rows) == 1 && !appended {
 				file, err := os.OpenFile(filepath.Join(dir, "logs.jsonl"), os.O_APPEND|os.O_WRONLY, 0600)

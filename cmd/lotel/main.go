@@ -153,21 +153,32 @@ func main() {
 	queryTracesCmd := &cobra.Command{
 		Use:   "traces",
 		Short: "Query traces (JSON output)",
-		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
 			}
-			results, err := storage.QueryTraces(db, opts)
-			if err != nil {
-				return err
+			traceOpts := storage.TraceQueryOptions{QueryOptions: opts}
+			traceOpts.ErrorsOnly, _ = cmd.Flags().GetBool("errors-only")
+			if cmd.Flags().Changed("min-duration") {
+				duration, _ := cmd.Flags().GetDuration("min-duration")
+				if duration < 0 {
+					return fmt.Errorf("--min-duration must be nonnegative")
+				}
+				traceOpts.MinDuration = &duration
 			}
-			if results == nil {
-				results = []storage.TraceResult{}
-			}
-			printJSON(results)
-			return nil
-		}),
+			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+				results, err := storage.QueryTraces(db, traceOpts)
+				if err != nil {
+					return err
+				}
+				if results == nil {
+					results = []storage.TraceResult{}
+				}
+				printJSON(results)
+				return nil
+			})(cmd, args)
+		},
 	}
 
 	queryMetricsCmd := &cobra.Command{
@@ -193,21 +204,28 @@ func main() {
 	queryLogsCmd := &cobra.Command{
 		Use:   "logs",
 		Short: "Query logs (JSON output)",
-		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
 			}
-			results, err := storage.QueryLogs(db, opts)
+			logOpts := storage.LogQueryOptions{QueryOptions: opts}
+			logOpts.MinSeverity, logOpts.BodyContains, err = parseLogFilters(cmd)
 			if err != nil {
 				return err
 			}
-			if results == nil {
-				results = []storage.LogResult{}
-			}
-			printJSON(results)
-			return nil
-		}),
+			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+				results, err := storage.QueryLogs(db, logOpts)
+				if err != nil {
+					return err
+				}
+				if results == nil {
+					results = []storage.LogResult{}
+				}
+				printJSON(results)
+				return nil
+			})(cmd, args)
+		},
 	}
 
 	// --- query metrics aggregate ---
@@ -244,14 +262,18 @@ func main() {
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd} {
 		cmd.Flags().String("name", "", "exact span or metric name")
 	}
+	queryTracesCmd.Flags().Bool("errors-only", false, "filter spans with OpenTelemetry error status")
+	queryTracesCmd.Flags().Duration("min-duration", 0, "minimum span duration (inclusive, e.g. 100ms)")
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryLogsCmd} {
 		cmd.Flags().String("trace-id", "", "trace ID (lowercase hex)")
 	}
 	queryLogsCmd.Flags().String("event-name", "", "exact log event name")
+	queryLogsCmd.Flags().String("min-severity", "", "minimum severity: trace, debug, info, warn, error, fatal")
+	queryLogsCmd.Flags().String("body-contains", "", "case-insensitive literal substring in projected log body")
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd, queryLogsCmd} {
 		cmd.Flags().StringArray("attr", nil, "attribute key=value; repeat for AND; matches compact JSON string form, null never matches")
 	}
-	queryCmd.AddCommand(queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
+	queryCmd.AddCommand(discoveryCommand("services"), discoveryCommand("operations"), spanStatsCommand(), logStatsCommand(), traceCommand(), queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
 
 	// --- prune ---
 	var olderThan string
@@ -300,8 +322,11 @@ func main() {
 	pruneCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be pruned without deleting")
 	pruneCmd.Flags().BoolVar(&pruneAll, "all", false, "delete all telemetry data")
 
+	var catalog commandCatalog
 	rootCmd.AddCommand(runtimeRunCommand())
-	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, pruneCmd, upgradeCommand())
+	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, assertCommand(), pruneCmd, upgradeCommand(), commandsCommand(&catalog))
+	rootCmd.InitDefaultVersionFlag()
+	catalog = buildCommandCatalog(rootCmd, version)
 
 	ctx := context.Background()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
