@@ -242,7 +242,11 @@ their OpenTelemetry guides. It lists symlinks, nonregular entries, and entries
 without read permission bits separately. The command does not read manifest
 contents or inspect subdirectories. Manifest names do not prove that a project
 is instrumented or that a Collector is reachable. The `package.json` entry
-identifies a JavaScript ecosystem, not a running Node service.
+identifies a JavaScript ecosystem, not a running Node service. The command makes
+no explicit network requests, but the operating system may access a remote
+filesystem when the selected path or a symlink resolves to one. Setup
+recommendations are not supported on Windows: safely inspecting paths there
+requires additional handling of device and reparse-point paths.
 
 The report includes OTLP exporter guidance for applications that use the
 managed Collector defaults and an SDK that honors the environment variables.

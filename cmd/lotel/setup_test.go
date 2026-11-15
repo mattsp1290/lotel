@@ -29,6 +29,9 @@ func runSetup(t *testing.T, args ...string) (setupReport, []byte, error) {
 }
 
 func TestSetupRecommendations(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("setup recommendations are unsupported on Windows")
+	}
 	project := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -83,6 +86,9 @@ func TestSetupRecommendations(t *testing.T) {
 }
 
 func TestSetupBoundaries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("setup recommendations are unsupported on Windows")
+	}
 	project := t.TempDir()
 	child := filepath.Join(project, "child")
 	if err := os.Mkdir(child, 0700); err != nil {

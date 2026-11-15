@@ -1,30 +1,53 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
-func TestSetupWindowsCurrentDriveRoot(t *testing.T) {
-	report, _, err := runSetup(t, "--recommend-only", "--path", `\`)
-	if err != nil || report.Path != `\` {
-		t.Fatalf("current drive root: %+v %v", report, err)
+func TestSetupWindowsUnsupportedWithoutConnecting(t *testing.T) {
+	name := fmt.Sprintf(`\\.\pipe\lotel-setup-test-%d`, os.Getpid())
+	name16, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipe, err := windows.CreateNamedPipe(name16, windows.PIPE_ACCESS_DUPLEX, windows.PIPE_TYPE_BYTE|windows.PIPE_NOWAIT, 1, 256, 256, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(pipe)
+	_, output, err := runSetup(t, "--recommend-only", "--path", name)
+	if err == nil || !strings.Contains(err.Error(), "not supported on Windows") || len(output) != 0 {
+		t.Fatalf("expected unsupported error without output: %q %v", output, err)
+	}
+	if err := windows.ConnectNamedPipe(pipe, nil); !errors.Is(err, windows.ERROR_PIPE_LISTENING) {
+		t.Fatalf("pipe connected or unavailable: %v", err)
 	}
 }
 
-func TestSetupWindowsVerbatimPath(t *testing.T) {
-	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "go.mod"), nil, 0600); err != nil {
+func TestSetupWindowsUnsupportedWithoutChanges(t *testing.T) {
+	dir, err := os.MkdirTemp("", "lotel-setup-")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.HasPrefix(project, `\\`) {
-		t.Skip("test needs a drive-letter temporary directory")
+	defer os.Remove(dir)
+	manifest := filepath.Join(dir, "go.mod")
+	if err := os.WriteFile(manifest, []byte("unchanged"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	verbatim := `\\?\` + project
-	report, _, err := runSetup(t, "--recommend-only", "--path", verbatim)
-	if err != nil || report.Path != verbatim || len(report.Candidates) != 1 || report.Candidates[0].Ecosystem != "Go" {
-		t.Fatalf("verbatim directory: %+v %v", report, err)
+	defer os.Remove(manifest)
+	_, output, err := runSetup(t, "--recommend-only", "--path", dir)
+	if err == nil || !strings.Contains(err.Error(), "not supported on Windows") || len(output) != 0 {
+		t.Fatalf("expected unsupported error without output: %q %v", output, err)
+	}
+	content, err := os.ReadFile(manifest)
+	if err != nil || string(content) != "unchanged" {
+		t.Fatalf("manifest changed: %q %v", content, err)
 	}
 }
