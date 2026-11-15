@@ -8,7 +8,7 @@ import (
 	_ "github.com/marcboeker/go-duckdb"
 )
 
-// OpenDB opens and migrates a DuckDB connection to the given path.
+// OpenDB opens a caller-owned DuckDB connection at path.
 func OpenDB(path string) (*sql.DB, error) {
 	db, err := sql.Open("duckdb", path)
 	if err != nil {

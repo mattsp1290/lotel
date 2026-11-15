@@ -66,8 +66,8 @@ func Run(ctx context.Context, options RuntimeOptions) error {
 		}
 		status := Status{Backend: options.Backend, PID: os.Getpid(), Ingestion: worker.Status()}
 		if col != nil {
-			status.Running = col.GetState() != otelcol.StateClosed
-			status.Healthy = col.GetState() == otelcol.StateRunning
+			status.Running = col.GetState() == otelcol.StateRunning
+			status.Healthy = status.Running
 		} else {
 			running, err := inspectDockerRunning(r.Context())
 			if err != nil {

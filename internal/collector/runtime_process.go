@@ -165,7 +165,7 @@ func startRuntime(ctx context.Context, configPath, dataPath, backend string) err
 			return err
 		}
 		status, statusErr := requestRuntimeStatus(ctx, state)
-		if statusErr == nil && status.Running && (backend == "docker" || status.Healthy) {
+		if statusErr == nil && status.Running {
 			if err := ctx.Err(); err != nil {
 				stopChild()
 				return err

@@ -166,64 +166,6 @@ func containerExists() bool {
 	return err == nil
 }
 
-func InspectForUpgrade(ctx context.Context) (*Status, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	state, err := readStateFile(filepath.Join(home, stateDir, stateFile))
-	if err != nil {
-		return nil, err
-	}
-	if state != nil && state.Backend == "native" && state.ControlSocket != "" {
-		return runtimeStatus(ctx, state)
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	docker, err := exec.LookPath("docker")
-	if state == nil && errors.Is(err, exec.ErrNotFound) {
-		return &Status{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("locating Docker for Collector inspection: %w", err)
-	}
-	list := exec.CommandContext(ctx, docker, "ps", "--all", "--filter", "name=^/"+containerName+"$", "--format", "{{.ID}}")
-	list.WaitDelay = time.Second
-	out, err := list.Output()
-	if err != nil {
-		return nil, fmt.Errorf("inspect Collector container list: %w", err)
-	}
-	ids := strings.Fields(string(out))
-	if len(ids) == 0 {
-		return &Status{}, nil
-	}
-	if len(ids) != 1 || len(ids[0]) < 12 || len(ids[0]) > 64 || strings.Trim(ids[0], "0123456789abcdef") != "" {
-		return nil, fmt.Errorf("Docker returned an invalid Collector container ID")
-	}
-	inspect := exec.CommandContext(ctx, docker, "inspect", "--format", "{{.State.Running}}", ids[0])
-	inspect.WaitDelay = time.Second
-	out, err = inspect.Output()
-	if err != nil {
-		return nil, fmt.Errorf("inspect Collector running state: %w", err)
-	}
-	switch strings.TrimSpace(string(out)) {
-	case "false":
-		return &Status{}, nil
-	case "true":
-	default:
-		return nil, fmt.Errorf("Docker returned an invalid Collector running state")
-	}
-	state, err = readStateFile(filepath.Join(home, stateDir, stateFile))
-	if err != nil {
-		return nil, err
-	}
-	if state == nil || state.ConfigPath == "" {
-		return nil, fmt.Errorf("running Collector has no recorded config path; restart it with lotel before upgrading")
-	}
-	return &Status{Running: true, ConfigPath: state.ConfigPath, Backend: "docker"}, nil
-}
-
 func startDocker(ctx context.Context, configPath, dataPath string) error {
 	absConfig, err := filepath.Abs(configPath)
 	if err != nil {

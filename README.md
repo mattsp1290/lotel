@@ -1,8 +1,8 @@
 # lotel
 
-Collect and query OpenTelemetry on your machine. Lotel runs the OTel Collector
-as a native process or in Docker and indexes its JSONL files in DuckDB. Queries
-return JSON for coding agents and scripts.
+Collect and query OpenTelemetry on your machine. Lotel runs official Go
+Collector components as a native process or Docker container and indexes their
+JSONL files in DuckDB. Queries return JSON for coding agents and scripts.
 
 `lotel` gives a coding agent local traces, metrics, and logs to check an
 application while it runs. The default Collector writes telemetry to your
@@ -60,17 +60,17 @@ the executable in place.
 Before replacement, `upgrade` warns on stderr that OpenTelemetry collection
 will be unavailable. Agents must retain stderr even when they request `--json`.
 It stops a running Collector, replaces the executable, then uses the new
-executable to restart the Collector with its recorded configuration and wait for
-health. An upgrade can therefore apply new Collector versions and defaults.
+executable to restart the Collector with its recorded backend and configuration
+and wait for health. An upgrade can therefore apply new Collector versions and defaults.
 Telemetry emitted during that gap can be lost unless your application buffers
 or retries it. An initially stopped Collector stays stopped. `--check` and upgrades that need no replacement
-do not interrupt collection. If Docker cannot report the Collector state,
-the upgrade aborts before replacement and preserves the recorded state.
+do not interrupt collection. If the recorded backend cannot report the Collector
+state, the upgrade aborts before replacement and preserves the recorded state.
 
 If an upgrade fails after the stop, it attempts to restart collection and reports
 any recovery failure. Use the recovery command printed by `upgrade`, including
-its recorded `--config` path, then run `lotel health`. Resume telemetry checks
-only after the Collector is healthy.
+its recorded `--config` path and native backend flag when present, then run
+`lotel health`. Resume telemetry checks only after the Collector is healthy.
 Upgrading the executable preserves the local telemetry files. The Collector may
 refresh its managed configuration when it starts.
 
@@ -82,7 +82,8 @@ upgrade safeguards, and release publishing.
 
 ## Quick start
 
-Install and start Docker before you start the Collector.
+Install and start Docker for the default backend, or use `lotel start --backend native --wait`
+to run the official Go Collector components without Docker.
 
 ```bash
 lotel start --wait
@@ -328,11 +329,13 @@ records. A skipped projection does not imply that its OTLP payload was lost.
 `projection_skipped_lines` counts envelopes that the convenience decoder could
 not interpret. Prune reports use `otlp_envelopes_deleted` for complete envelopes.
 
-The v2 upgrade preserves indexed rows and existing ingestion progress. Complete
-OTLP retention starts at that progress point, so previously ingested history
+Upgrading from schema v2 to v3 preserves indexed rows and existing ingestion
+progress. Complete OTLP retention starts at that progress point, so previously ingested history
 remains available through the existing queries. It does not gain complete
-OTLP payloads retroactively. Databases older than v2 still rebuild their index.
-Run `lotel ingest` to reload that raw history. Pruned rows can reappear after
+OTLP payloads retroactively. Run `lotel ingest --full` to backfill complete
+envelopes from retained raw history without duplicating projected rows.
+Databases older than v2 still rebuild their index. Run `lotel ingest` to reload
+that raw history. Pruned rows can reappear after
 a rebuild because prune leaves the raw JSONL files intact.
 
 ## Configuration
@@ -403,7 +406,10 @@ out after 30 seconds. A background pass retries on the next interval.
 `lotel status` includes an `ingestion` object with `enabled`, `running`,
 `interval`, `last_success`, and `last_error`. The first successful pass sets
 `last_success`. An ingestion error appears in status and the Collector log.
-Collection continues after ingestion errors. `lotel health` fails while an
+Collection continues after ingestion errors, including errors present at startup.
+`lotel start` accepts a ready Collector; `lotel start --wait` also waits for
+ingestion health and leaves collection running if that health check times out.
+`lotel health` fails while an
 enabled worker reports an error or is unavailable. A successful pass clears the
 error. Ingestion latency also includes SDK export and Collector batch delays.
 

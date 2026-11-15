@@ -34,8 +34,7 @@ func upgradeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var restartConfig string
-			var restartBackend string
+			var restartConfig, restartBackend string
 			req := upgrade.Request{Current: version, Executable: path, BaseURL: os.Getenv("LOTEL_RELEASE_BASE_URL"), Version: target, Check: check, Force: force, SourceBuild: distribution != "release"}
 			report, err := upgradeWithCollector(cmd.Context(), req, collectorControl{
 				running: func(ctx context.Context) (bool, error) {
@@ -49,18 +48,14 @@ func upgradeCommand() *cobra.Command {
 				},
 				stop: func(ctx context.Context) error { return runCollectorCommand(ctx, path, cmd.ErrOrStderr(), "stop") },
 				start: func(ctx context.Context) error {
-					args := []string{"start", "--wait", "--config", restartConfig}
-					if restartBackend != "" {
-						args = append(args, "--backend", restartBackend)
-					}
-					return runCollectorCommand(ctx, path, cmd.ErrOrStderr(), args...)
+					return runCollectorCommand(ctx, path, cmd.ErrOrStderr(), collectorRestartArgs(restartConfig, restartBackend)...)
 				},
 				recovery: func() string {
-					command := fmt.Sprintf("%s start --wait --config %s", shellLiteral(path), shellLiteral(restartConfig))
-					if restartBackend != "" {
-						command += " --backend " + shellLiteral(restartBackend)
+					parts := []string{shellLiteral(path)}
+					for _, arg := range collectorRestartArgs(restartConfig, restartBackend) {
+						parts = append(parts, shellLiteral(arg))
 					}
-					return command
+					return strings.Join(parts, " ")
 				},
 			}, cmd.ErrOrStderr())
 			if jsonOutput {
@@ -84,6 +79,14 @@ func upgradeCommand() *cobra.Command {
 	command.Flags().BoolVar(&force, "force", false, "allow replacement of a source or development build")
 	command.Flags().StringVar(&target, "version", "", "install a specific vX.Y.Z release, including a rollback")
 	return command
+}
+
+func collectorRestartArgs(configPath, backend string) []string {
+	args := []string{"start", "--wait", "--config", configPath}
+	if backend == "native" {
+		args = append(args, "--backend", "native")
+	}
+	return args
 }
 
 type collectorControl struct {
