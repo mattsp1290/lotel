@@ -23,7 +23,7 @@ func TestMetricDeltaTotalContiguousExactCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Total != "9223372036854775809" || got.PointCount != 2 || got.FromUnixNano != "10" || got.ToUnixNano != "30" || len(got.Assumptions) != 2 {
+	if got.Total != "9223372036854775809" || got.RatePerSecond != "461168601842738790450000000" || got.PointCount != 2 || got.FromUnixNano != "10" || got.ToUnixNano != "30" || len(got.Assumptions) != 2 {
 		t.Fatalf("unexpected result: %+v", got)
 	}
 }

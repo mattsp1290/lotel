@@ -129,7 +129,7 @@ func decodeMetricEnvelope(data []byte) (*metricpb.MetricsData, error) {
 	}
 	return m, nil
 }
-func parseMetricSelection(ctx context.Context, data []byte, temporality metricpb.AggregationTemporality) (metricSelection, error) {
+func parseMetricSelection(ctx context.Context, data []byte, temporality metricpb.AggregationTemporality, kind metricKind) (metricSelection, error) {
 	var id metricSelection
 	if len(data) > MetricSelectorByteLimit {
 		return id, fmt.Errorf("metric selector exceeds size limit")
@@ -160,12 +160,22 @@ func parseMetricSelection(ctx context.Context, data []byte, temporality metricpb
 		return id, fmt.Errorf("selector must contain one metric")
 	}
 	metric := s.Metrics[0]
-	sum := metric.GetSum()
-	if metric.Name == "" || sum == nil || !sum.IsMonotonic || sum.AggregationTemporality != temporality || len(sum.DataPoints) != 1 || sum.DataPoints[0] == nil {
-		if temporality == metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA {
-			return id, fmt.Errorf("selector must contain one delta monotonic sum point")
+	var pointAttrs []*commonpb.KeyValue
+	if kind == metricHistogram {
+		histogram := metric.GetHistogram()
+		if metric.Name == "" || histogram == nil || histogram.AggregationTemporality != temporality || len(histogram.DataPoints) != 1 || histogram.DataPoints[0] == nil {
+			return id, fmt.Errorf("selector must contain one explicit histogram point with the requested temporality")
 		}
-		return id, fmt.Errorf("selector must contain one cumulative monotonic sum point")
+		pointAttrs = histogram.DataPoints[0].Attributes
+	} else {
+		sum := metric.GetSum()
+		if metric.Name == "" || sum == nil || !sum.IsMonotonic || sum.AggregationTemporality != temporality || len(sum.DataPoints) != 1 || sum.DataPoints[0] == nil {
+			if temporality == metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA {
+				return id, fmt.Errorf("selector must contain one delta monotonic sum point")
+			}
+			return id, fmt.Errorf("selector must contain one cumulative monotonic sum point")
+		}
+		pointAttrs = sum.DataPoints[0].Attributes
 	}
 	if id.resource, err = canonicalResource(r.Resource, true); err != nil {
 		return id, err
@@ -173,7 +183,7 @@ func parseMetricSelection(ctx context.Context, data []byte, temporality metricpb
 	if id.scope, err = canonicalScope(s.Scope, true); err != nil {
 		return id, err
 	}
-	if id.attributes, err = canonicalPoint(sum.DataPoints[0].Attributes, true); err != nil {
+	if id.attributes, err = canonicalPoint(pointAttrs, true); err != nil {
 		return id, err
 	}
 	id.resourceSchema, id.scopeSchema, id.name, id.unit = r.SchemaUrl, s.SchemaUrl, metric.Name, metric.Unit
@@ -192,29 +202,45 @@ func parseMetricSelection(ctx context.Context, data []byte, temporality metricpb
 			return id, err
 		}
 	}
-	id.pointAttrs, err = canonicalAttributeMap(sum.DataPoints[0].Attributes)
+	id.pointAttrs, err = canonicalAttributeMap(pointAttrs)
 	if err != nil {
 		return id, err
 	}
 	return id, nil
 }
 
+type metricKind uint8
+
+const (
+	metricSum metricKind = iota
+	metricHistogram
+)
+
 type MetricSelector struct {
 	identity    metricSelection
+	kind        metricKind
 	temporality metricpb.AggregationTemporality
 }
 
 func PrepareMetricSelector(ctx context.Context, data []byte) (MetricSelector, error) {
-	return prepareMetricSelector(ctx, data, metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE)
+	return prepareMetricSelector(ctx, data, metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE, metricSum)
 }
 
 func PrepareDeltaMetricSelector(ctx context.Context, data []byte) (MetricSelector, error) {
-	return prepareMetricSelector(ctx, data, metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA)
+	return prepareMetricSelector(ctx, data, metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA, metricSum)
 }
 
-func prepareMetricSelector(ctx context.Context, data []byte, temporality metricpb.AggregationTemporality) (MetricSelector, error) {
-	id, err := parseMetricSelection(ctx, data, temporality)
-	return MetricSelector{identity: id, temporality: temporality}, err
+func PrepareDeltaHistogramSelector(ctx context.Context, data []byte) (MetricSelector, error) {
+	return prepareMetricSelector(ctx, data, metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA, metricHistogram)
+}
+
+func PrepareCumulativeHistogramSelector(ctx context.Context, data []byte) (MetricSelector, error) {
+	return prepareMetricSelector(ctx, data, metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE, metricHistogram)
+}
+
+func prepareMetricSelector(ctx context.Context, data []byte, temporality metricpb.AggregationTemporality, kind metricKind) (MetricSelector, error) {
+	id, err := parseMetricSelection(ctx, data, temporality, kind)
+	return MetricSelector{identity: id, temporality: temporality, kind: kind}, err
 }
 
 func canonicalAttributeMap(attrs []*commonpb.KeyValue) (map[string][]byte, error) {

@@ -226,8 +226,10 @@ lotel --version
 | `lotel query genai calls` | Query model, agent, and tool calls |
 | `lotel query genai usage` | Group token usage, errors, and latency |
 | `lotel query aggregate` | Compute avg/min/max for a metric |
-| `lotel query metric-difference` | Compare two exact retained cumulative integer sum points |
-| `lotel query metric-delta-total` | Total contiguous retained delta integer sum points |
+| `lotel query metric-difference` | Calculate an observed increase and per-second rate between cumulative integer sum points |
+| `lotel query metric-delta-total` | Calculate a total and per-second rate over contiguous delta integer sum points |
+| `lotel query metric-delta-histogram` | Sum reported explicit bucket counts over contiguous delta intervals |
+| `lotel query metric-cumulative-histogram` | Compare reported explicit bucket counts at two cumulative endpoints |
 | `lotel prune` | Delete telemetry older than threshold |
 
 `lotel commands` returns a versioned catalog of registered visible commands and
@@ -292,14 +294,16 @@ lotel query metric-difference --selector selector.json --from-ns 170000000000000
 ```
 
 The result contains decimal strings for the difference and elapsed nanoseconds.
+`rate_per_second` gives the exact average increase per second between those
+observations. It is a reduced fraction string such as `"1000000000/3"` for one
+unit in three nanoseconds, or an integer string such as `"0"` or `"12"`.
 The command scans all retained metric envelopes. It returns an error when the
 selected points are missing, duplicated, flagged, reset, decreasing, or not
 integer values, or when a later point declares an overlapping cumulative epoch.
 It also rejects unsupported or ambiguous identity data, and
 conflicting metric types or temporalities with the same resource, scope, name,
 unit, and matching point attributes. Dropped resource or scope attributes and resource entity references
-are unsupported. The result is an observed pair difference, not a rate or a
-complete-window total. It assumes a single writer. Ingestion or retention can
+are unsupported. The difference and rate describe retained endpoints in one cumulative epoch and assume a single writer. Ingestion or retention can
 leave history incomplete, including missing resets or missing-value markers.
 Results use retained envelopes only. Ingestion canonicalizes top-level JSON objects;
 duplicate top-level resourceMetrics fields can lose earlier values. Full backfill
@@ -313,15 +317,52 @@ window. For example:
 lotel query metric-delta-total --selector delta-selector.json --from-ns 1700000000000000001 --to-ns 1700000000000000003
 ```
 
-The result contains the exact total as a decimal string and the number of
-points. Missing, overlapping, duplicate, flagged, fractional, negative or
+The result contains the exact total as a decimal string, the number of points
+and `rate_per_second`. The rate divides the observed total by the duration of
+the covered window in seconds and uses the same reduced fraction format. Missing, overlapping, duplicate, flagged, fractional, negative or
 partially overlapping points make the result indeterminate. A point with an
 unknown start after the requested start also makes it indeterminate. As with
 the cumulative comparison, the result is based only on retained data and
 assumes a single writer. Undetected losses and the ingestion limitations above
 can make the observed total incomplete even when observed intervals are contiguous.
 
-Both commands use the same resource limits and identity checks. The selector is limited to 4 MiB. The scan stops with an indeterminate error
+`query metric-delta-histogram` and `query metric-cumulative-histogram` use
+the same OTLP selector structure with one `histogram` point in place of the sum.
+Set `aggregationTemporality` to 1 for delta or 2 for cumulative.
+
+```bash
+lotel query metric-delta-histogram --selector delta-histogram.json --from-ns 1700000000000000001 --to-ns 1700000000000000003
+lotel query metric-cumulative-histogram --selector cumulative-histogram.json --from-ns 1700000000000000001 --to-ns 1700000000000000003
+```
+
+Both commands return `count` and `bucket_counts` as decimal strings, the explicit
+upper `bounds` as JSON numbers, and the number of selected points as `point_count`.
+Upper bounds are inclusive. The final bucket contains values above the last
+bound. A histogram with no explicit bounds must report one bucket.
+
+- Delta adds the reported buckets in intervals exactly covering `(from, to]`.
+  Its `basis` is `contiguous_delta_bucket_counts`. Gaps, overlaps, partial
+  intervals and unknown starts that could overlap the window produce an error.
+- Cumulative subtracts each bucket at `from` from the same bucket at `to`.
+  Its `basis` is `cumulative_bucket_count_difference`. Both endpoints must be
+  observed in the same epoch. Every retained snapshot of that epoch must have
+  identical bounds, nondecreasing counts in each bucket and a unique timestamp.
+  `point_count` includes both endpoints and retained snapshots between them.
+
+The `validation_scope` field identifies these as summaries of reported bucket
+counts. Every included histogram must have finite, strictly increasing bounds
+and a count equal to the sum of its buckets. Both commands ignore the values
+of `sum`, `min` and `max`, including contradictory extrema and overflowing
+sums. Both reject flagged evidence and ambiguous stream identity. All results
+assume one writer and can miss evidence lost before or during retention.
+
+Rates support monotonic integer sums. Histogram summaries support explicit
+bucket histograms. Gauges, floating-point sums, exponential histograms and
+summary points are outside these commands' scope. A window containing an
+observed reset produces an error. These commands do not estimate quantiles or
+reconstruct unobserved resets.
+
+All four commands use the same resource limits and identity checks. The selector is limited to 4 MiB. The scan stops with an indeterminate error
 after 100,000 envelopes, 4 MiB in one envelope, 64 MiB of
 envelope data, 100,000 points across all streams, or one million JSON tokens.
 Every retained metrics envelope must decode completely. Unknown or malformed
@@ -482,7 +523,7 @@ The substring must not be empty.
 Generic queries order oldest first. `genai calls` orders newest first.
 Usage defaults to grouping by provider, model, and operation. It reports token
 totals, calls with missing usage, errors, and nearest-rank latency percentiles.
-For cumulative histograms, read the latest `query metrics --name <name>` point.
+For an observed interval in a cumulative explicit histogram, use `query metric-cumulative-histogram`.
 `query aggregate` aggregates per-point sums without correcting cumulative temporality.
 
 `lotel query span-stats --since 15m` groups projected spans by service, name,

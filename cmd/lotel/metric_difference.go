@@ -14,18 +14,26 @@ import (
 )
 
 func metricDifferenceCommand() *cobra.Command {
-	return metricComparisonCommand(false)
+	return metricComparisonCommand("metric-difference", "Compare cumulative integer sum points and report their observed rate (JSON)", storage.PrepareMetricSelector, storage.QueryMetricDifference)
 }
 
 func metricDeltaTotalCommand() *cobra.Command {
-	return metricComparisonCommand(true)
+	return metricComparisonCommand("metric-delta-total", "Total contiguous delta integer sum points and report their observed rate (JSON)", storage.PrepareDeltaMetricSelector, storage.QueryMetricDeltaTotal)
 }
 
-func metricComparisonCommand(delta bool) *cobra.Command {
+func metricDeltaHistogramCommand() *cobra.Command {
+	return metricComparisonCommand("metric-delta-histogram", "Sum observed contiguous delta histogram bucket counts (JSON)", storage.PrepareDeltaHistogramSelector, storage.QueryMetricHistogram)
+}
+
+func metricCumulativeHistogramCommand() *cobra.Command {
+	return metricComparisonCommand("metric-cumulative-histogram", "Compare observed cumulative histogram bucket counts (JSON)", storage.PrepareCumulativeHistogramSelector, storage.QueryMetricHistogram)
+}
+
+func metricComparisonCommand[T any](name, description string, prepare func(context.Context, []byte) (storage.MetricSelector, error), query func(context.Context, *sql.DB, storage.MetricSelector, uint64, uint64) (T, error)) *cobra.Command {
 	var selector, fromText, toText string
 	cmd := &cobra.Command{
-		Use:   "metric-difference",
-		Short: "Compare two observed cumulative integer sum points (JSON)",
+		Use:   name,
+		Short: description,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
@@ -54,26 +62,14 @@ func metricComparisonCommand(delta bool) *cobra.Command {
 			if len(input) > storage.MetricSelectorByteLimit {
 				return fmt.Errorf("metric selector exceeds size limit")
 			}
-			var prepared storage.MetricSelector
-			if delta {
-				prepared, err = storage.PrepareDeltaMetricSelector(ctx, input)
-			} else {
-				prepared, err = storage.PrepareMetricSelector(ctx, input)
-			}
+			prepared, err := prepare(ctx, input)
 			if err != nil {
 				return fmt.Errorf("invalid metric selector: %w", err)
 			}
 			return withDatabaseJSON(func(_ *cobra.Command, _ []string, db *sql.DB) (any, error) {
-				if delta {
-					return storage.QueryMetricDeltaTotal(ctx, db, prepared, from, to)
-				}
-				return storage.QueryMetricDifference(ctx, db, prepared, from, to)
+				return query(ctx, db, prepared, from, to)
 			}, true)(cmd, args)
 		},
-	}
-	if delta {
-		cmd.Use = "metric-delta-total"
-		cmd.Short = "Total contiguous observed delta integer sum points (JSON)"
 	}
 	cmd.Flags().StringVar(&selector, "selector", "", "path to single-stream OTLP JSON selector (required)")
 	cmd.Flags().StringVar(&fromText, "from-ns", "", "start timestamp as Unix nanoseconds (required)")
