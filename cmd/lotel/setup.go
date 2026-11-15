@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"unicode/utf8"
 
@@ -20,6 +19,10 @@ type setupCandidate struct {
 type setupSkipped struct {
 	Manifest string `json:"manifest"`
 	Reason   string `json:"reason"`
+}
+
+type setupEntry struct {
+	symlink, regular, readableBits bool
 }
 
 type setupReport struct {
@@ -56,11 +59,7 @@ func setupCommand() *cobra.Command {
 			if path == "" || !utf8.ValidString(path) {
 				return fmt.Errorf("--path must be nonempty UTF-8")
 			}
-			directoryPath := path + string(os.PathSeparator) + "."
-			if filepath.VolumeName(path) == path && !filepath.IsAbs(path) {
-				directoryPath = path + "."
-			}
-			root, err := os.OpenRoot(directoryPath)
+			root, err := openSetupDirectory(path)
 			if err != nil {
 				return fmt.Errorf("inspect project directory: %w", err)
 			}
@@ -72,7 +71,7 @@ func setupCommand() *cobra.Command {
 			}
 			indices := map[string]int{}
 			for _, manifest := range setupManifests {
-				info, err := root.Lstat(manifest.name)
+				entry, err := root.lookup(manifest.name)
 				if errors.Is(err, os.ErrNotExist) {
 					continue
 				}
@@ -80,11 +79,11 @@ func setupCommand() *cobra.Command {
 				switch {
 				case err != nil:
 					reason = "unavailable"
-				case info.Mode()&os.ModeSymlink != 0:
+				case entry.symlink:
 					reason = "symlink"
-				case !info.Mode().IsRegular():
+				case !entry.regular:
 					reason = "not_regular"
-				case info.Mode().Perm()&0444 == 0:
+				case !entry.readableBits:
 					reason = "no_read_permission_bits"
 				}
 				if reason != "" {
