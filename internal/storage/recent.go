@@ -32,7 +32,7 @@ func RecentTraces(db queryer, opts TraceQueryOptions) ([]TraceResult, bool, erro
 	if err != nil {
 		return nil, false, err
 	}
-	rows, err := queryTraces(db, opts, true)
+	rows, err := queryTraces(db, opts, true, nil)
 	if err != nil {
 		return nil, false, err
 	}
@@ -56,7 +56,7 @@ func RecentLogs(db queryer, opts LogQueryOptions) ([]LogResult, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	rows, err := queryLogs(db, opts, true)
+	rows, err := queryLogs(db, opts, true, nil)
 	if err != nil {
 		return nil, false, err
 	}
