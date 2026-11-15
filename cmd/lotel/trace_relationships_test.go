@@ -100,6 +100,57 @@ func TestTraceRelationshipsPreserveAmbiguousRecords(t *testing.T) {
 	}
 }
 
+func TestTraceRelationshipsOrderEqualTimestampRecords(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	span := func(value string) storage.TraceResult {
+		return storage.TraceResult{SpanID: "1111111111111111", Name: "request", StartTime: now, EndTime: now, Attributes: map[string]any{"key": value}}
+	}
+	log := func(value string) storage.LogResult {
+		return storage.LogResult{Timestamp: now, SpanID: "1111111111111111", Body: "message", Attributes: map[string]any{"key": value}}
+	}
+	makeBundle := func(reverseSpans, reverseLogs bool) traceBundle {
+		spans := []storage.TraceResult{span("z"), span("a"), span("a")}
+		logs := []storage.LogResult{log("z"), log("a"), log("a")}
+		if reverseSpans {
+			spans[0], spans[2] = spans[2], spans[0]
+		}
+		if reverseLogs {
+			logs[0], logs[2] = logs[2], logs[0]
+		}
+		return traceBundle{TraceID: strings.Repeat("a", 32), Spans: spans, Logs: logs}
+	}
+	encode := func(bundle traceBundle) []byte {
+		t.Helper()
+		if err := bundle.resolveRelationships(); err != nil {
+			t.Fatal(err)
+		}
+		if len(bundle.Spans) != 3 || len(bundle.Logs) != 3 {
+			t.Fatalf("lost duplicate records: %+v", bundle)
+		}
+		encoded, err := json.Marshal(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return encoded
+	}
+	want := encode(makeBundle(false, false))
+	for _, tc := range []struct {
+		name        string
+		spans, logs bool
+	}{
+		{name: "spans", spans: true},
+		{name: "logs", logs: true},
+		{name: "both", spans: true, logs: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := encode(makeBundle(tc.spans, tc.logs))
+			if !bytes.Equal(got, want) {
+				t.Fatalf("ordering depends on input: %s / %s", want, got)
+			}
+		})
+	}
+}
+
 func TestTraceCommandRelationships(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
