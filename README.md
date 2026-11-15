@@ -196,6 +196,7 @@ lotel --version
 |---------|-------------|
 | `lotel --version` | Show the executable version |
 | `lotel commands` | List registered commands and flags as JSON |
+| `lotel setup --recommend-only [--path <directory>]` | Recommend OpenTelemetry guides from manifest names |
 | `lotel upgrade [--check] [--json] [--version vX.Y.Z]` | Check for or install a release |
 | `lotel start [--wait] [--config <path>]` | Start the Docker Collector and automatic ingestion |
 | `lotel start --backend native [--wait]` | Start the bundled Collector without Docker, with automatic ingestion |
@@ -236,6 +237,24 @@ The set of commands and their defaults can change between lotel versions.
 
 The catalog does not describe all required arguments, validation rules, result
 schemas, or exit codes. Use the command's help and documentation for those.
+
+`lotel setup --recommend-only` checks a fixed set of manifest names in the
+current directory. Use `--path` to choose another directory, such as a project
+within a monorepo. The JSON report lists all recognized ecosystems and links to
+their OpenTelemetry guides. It lists symlinks, nonregular entries, and entries
+without read permission bits separately. The command does not read manifest
+contents or inspect subdirectories. Manifest names do not prove that a project
+is instrumented or that a Collector is reachable. The `package.json` entry
+identifies a JavaScript ecosystem, not a running Node service. The command makes
+no explicit network requests, but the operating system may access a remote
+filesystem when the selected path or a symlink resolves to one. Setup
+recommendations are not supported on Windows: safely inspecting paths there
+requires additional handling of device and reparse-point paths.
+
+The report includes OTLP exporter guidance for applications that use the
+managed Collector defaults and an SDK that honors the environment variables.
+`localhost` refers to the application's network namespace. Custom Collector
+configurations can use different endpoints.
 
 ## Assert signal evidence
 
