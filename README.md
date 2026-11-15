@@ -274,7 +274,7 @@ selected points are missing, duplicated, flagged, reset, decreasing, or not
 integer values, or when a later point declares an overlapping cumulative epoch.
 It also rejects unsupported or ambiguous identity data, and
 conflicting metric types or temporalities with the same resource, scope, name,
-and unit. Dropped resource or scope attributes and resource entity references
+unit, and matching point attributes. Dropped resource or scope attributes and resource entity references
 are unsupported. The result is an observed pair difference, not a rate or a
 complete-window total. It assumes a single writer. Ingestion or retention can
 leave history incomplete, including missing resets or missing-value markers.
