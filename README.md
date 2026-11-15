@@ -211,6 +211,7 @@ lotel --version
 | `lotel query log-stats` | Summarize observed logs by service and severity |
 | `lotel query services` | List observed services and their signals |
 | `lotel query operations` | List observed span names and kinds |
+| `lotel query dependencies` | Summarize observed client-to-server service relationships |
 | `lotel query trace <trace-id>` | Query a trace and its correlated logs (JSON output) |
 | `lotel query metrics` | Query metrics (JSON output) |
 | `lotel query logs` | Query logs (JSON output) |
@@ -259,7 +260,7 @@ Each result describes one database query. Ingestion, pruning, or rebuilding can
 change a later result. This command does not provide a continuation cursor.
 The limit bounds returned records, not the work needed to search the database.
 
-All query commands except `query trace` support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`:
+Query commands accept different filters. Most support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`. The single-trace query has no time or service filters, and dependency discovery accepts only `--since` and `--until`:
 
 ```
 --service     Filter by service.name
@@ -273,6 +274,34 @@ It does not include profile-only services or establish whether a service is runn
 Operation discovery lists distinct projected span names and kinds by service. Both
 commands filter the observation window before grouping and apply the limit after
 sorting. Missing service names appear as `unknown`; empty names remain empty.
+
+`lotel query dependencies --since 15m` reports observed cross-service edges
+from a CLIENT span to its direct SERVER child. The child's projected start time
+selects the window at microsecond precision. The parent and uniqueness checks
+use all retained spans, including spans outside the window. The start is required;
+the inclusive end defaults to now and cannot be in the future. Edges count unique
+child span identities. Each endpoint contains `service.name` and
+`service.namespace`. An absent namespace and an empty namespace are equivalent.
+Duplicate trace/span identities are excluded rather than
+guessed. The `exclusions` counts categorize each excluded SERVER record once, in
+the order shown in the JSON. Duplicate child records count individually there.
+Missing or invalid projected IDs, missing parents, ambiguous identities, invalid projected
+service identity types, unknown services,
+non-client parents, and same-service pairs are excluded. An `unknown` service
+can be either a real name or the ingestion fallback, so both are excluded. SDK
+fallback names `unknown_service` and `unknown_service:<executable>` are also
+excluded, even when used as a literal service name.
+The report excludes identity attributes that the projection identifies as
+non-string values, including explicit JSON null. It also excludes a span when
+the projected `service.name` differs from its stored service name. Duplicate
+attributes and original types that collapse to the same projected string cannot
+always be detected. A missing namespace remains equivalent to an empty string.
+Some OTLP values, including bytes and special floating-point values, project as
+strings, so their original types cannot always be identified. Legacy spans
+without projected resource attributes use their stored service name.
+Sampling, missing instrumentation, retention, and ingestion delays can hide
+edges. Messaging spans and span links are not represented. This report is not a
+complete topology or a request-volume estimate.
 
 Additional filters:
 
