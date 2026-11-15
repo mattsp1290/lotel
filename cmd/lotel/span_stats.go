@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -23,16 +24,13 @@ func spanStatsCommand() *cobra.Command {
 			if !validBoundedWindow(start, end, now) || limit < 0 {
 				return fmt.Errorf("invalid span statistics window or limit")
 			}
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-			results, err := storage.QuerySpanStats(db, storage.SpanStatsOptions{Service: service, Since: start, Until: end, Limit: limit})
-			if err != nil {
-				return err
-			}
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(results)
+			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+				results, err := storage.QuerySpanStats(db, storage.SpanStatsOptions{Service: service, Since: start, Until: end, Limit: limit})
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(results)
+			})(cmd, args)
 		},
 	}
 	cmd.Flags().StringVar(&service, "service", "", "filter by service.name")

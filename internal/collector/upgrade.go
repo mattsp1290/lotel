@@ -23,7 +23,7 @@ func InspectForUpgrade(ctx context.Context) (*Status, error) {
 		return nil, err
 	}
 	if state != nil && state.Backend == "native" {
-		status, err := nativeStatus(ctx, state)
+		status, err := runtimeStatus(ctx, state)
 		if err != nil {
 			return nil, err
 		}

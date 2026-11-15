@@ -1,6 +1,8 @@
 package main
 
 import (
+	"database/sql"
+
 	"github.com/mattsp1290/lotel/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -21,25 +23,22 @@ func discoveryCommand(name string) *cobra.Command {
 			if err := discoveryOpts.Validate(); err != nil {
 				return err
 			}
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-			if name == "services" {
-				results, err := storage.QueryServices(db, discoveryOpts)
+			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+				if name == "services" {
+					results, err := storage.QueryServices(db, discoveryOpts)
+					if err != nil {
+						return err
+					}
+					printJSON(results)
+					return nil
+				}
+				results, err := storage.QueryOperations(db, discoveryOpts)
 				if err != nil {
 					return err
 				}
 				printJSON(results)
 				return nil
-			}
-			results, err := storage.QueryOperations(db, discoveryOpts)
-			if err != nil {
-				return err
-			}
-			printJSON(results)
-			return nil
+			})(cmd, args)
 		},
 	}
 	cmd.Flags().StringVar(&service, "service", "", "filter by service.name")

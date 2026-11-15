@@ -21,6 +21,7 @@ func TestInterruptedDockerStartup(t *testing.T) {
 	docker := `#!/bin/sh
 case "$1" in
   inspect) exit 1 ;;
+  ps) exit 0 ;;
   run)
     printf ready > "$LOTEL_DOCKER_TEST_READY"
     /bin/sleep 1

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,12 +16,14 @@ func TestLifecycleMutationWaitsForLock(t *testing.T) {
 		if err := os.WriteFile(os.Getenv("LOTEL_LIFECYCLE_TEST_READY"), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
+		var err error
 		if action == "stop" {
-			if err := Stop(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-		} else if err := Start(context.Background(), os.Getenv("LOTEL_LIFECYCLE_TEST_CONFIG"), os.Getenv("LOTEL_LIFECYCLE_TEST_DATA"), "docker"); err == nil {
-			t.Fatal("Docker start succeeded without an executable")
+			err = Stop(context.Background())
+		} else {
+			err = Start(context.Background(), os.Getenv("LOTEL_LIFECYCLE_TEST_CONFIG"), os.Getenv("LOTEL_LIFECYCLE_TEST_DATA"), "docker")
+		}
+		if err == nil || !strings.Contains(err.Error(), "inspect Collector running state") {
+			t.Fatalf("%s did not report unknown Docker state: %v", action, err)
 		}
 		return
 	}
@@ -93,8 +96,8 @@ func TestLifecycleMutationWaitsForLock(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s did not finish after lock release: %v\n%s", action, err, output.String())
 			}
-			if state, err := readState(); err != nil || state != nil {
-				t.Fatalf("%s did not complete its state mutation after lock release: %+v, %v", action, state, err)
+			if state, err := readState(); err != nil || state == nil || state.ContainerID != "must-survive-while-locked" {
+				t.Fatalf("%s changed recorded ownership after failed Docker inspection: %+v, %v", action, state, err)
 			}
 		})
 	}

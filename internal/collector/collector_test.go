@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-func TestStartEnablesProfiles(t *testing.T) {
+func TestDockerLaunchEnablesProfiles(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("PATH", tmp)
 	argsPath := filepath.Join(tmp, "docker-args")
 	t.Setenv("LOTEL_TEST_DOCKER_ARGS", argsPath)
-	script := "#!/bin/sh\ncase \"$1\" in\ninspect) exit 1;;\nrun) printf '%s\\n' \"$@\" > \"$LOTEL_TEST_DOCKER_ARGS\"; printf 'test-container\\n';;\n*) exit 1;;\nesac\n"
+	script := "#!/bin/sh\ncase \"$1\" in\ninspect) exit 1;;\nps) exit 0;;\nrun) printf '%s\\n' \"$@\" > \"$LOTEL_TEST_DOCKER_ARGS\"; printf 'test-container\\n';;\n*) exit 1;;\nesac\n"
 	if err := os.WriteFile(filepath.Join(tmp, "docker"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestStartEnablesProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	dataPath := filepath.Join(tmp, "data")
-	if err := Start(context.Background(), cfg, dataPath, "docker"); err != nil {
+	if _, err := startDocker(context.Background(), cfg, dataPath); err != nil {
 		t.Fatal(err)
 	}
 	args, err := os.ReadFile(argsPath)
