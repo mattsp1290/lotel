@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -49,13 +48,13 @@ func logStatsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+			return withDatabaseJSON(func(cmd *cobra.Command, args []string, db *sql.DB) (any, error) {
 				results, err := storage.QueryLogStats(db, storage.LogStatsOptions{Service: service, Since: start, Until: end, Limit: limit, MinSeverity: severity, BodyContains: body})
 				if err != nil {
-					return err
+					return nil, err
 				}
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(results)
-			})(cmd, args)
+				return results, nil
+			}, false)(cmd, args)
 		},
 	}
 	cmd.Flags().StringVar(&service, "service", "", "filter by service.name")

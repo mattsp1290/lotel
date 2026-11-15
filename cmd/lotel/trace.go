@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -34,40 +33,45 @@ func traceCommand() *cobra.Command {
 			args[0] = strings.ToLower(args[0])
 			return nil
 		},
-		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
-			tx, err := db.Begin()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var bundle traceBundle
+			err := withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+				tx, err := db.Begin()
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+				opts := storage.QueryOptions{TraceID: args[0]}
+				spans, err := storage.QueryTraces(tx, storage.TraceQueryOptions{QueryOptions: opts})
+				if err != nil {
+					return err
+				}
+				logs, err := storage.QueryLogs(tx, storage.LogQueryOptions{QueryOptions: opts})
+				if err != nil {
+					return err
+				}
+				if spans == nil {
+					spans = []storage.TraceResult{}
+				}
+				if logs == nil {
+					logs = []storage.LogResult{}
+				}
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				bundle = traceBundle{TraceID: args[0], Spans: spans, Logs: logs}
+				return nil
+			})(cmd, args)
 			if err != nil {
 				return err
 			}
-			defer tx.Rollback()
-			opts := storage.QueryOptions{TraceID: args[0]}
-			spans, err := storage.QueryTraces(tx, storage.TraceQueryOptions{QueryOptions: opts})
-			if err != nil {
-				return err
-			}
-			logs, err := storage.QueryLogs(tx, storage.LogQueryOptions{QueryOptions: opts})
-			if err != nil {
-				return err
-			}
-			if spans == nil {
-				spans = []storage.TraceResult{}
-			}
-			if logs == nil {
-				logs = []storage.LogResult{}
-			}
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			encoder := json.NewEncoder(cmd.OutOrStdout())
-			encoder.SetIndent("", "  ")
-			bundle := traceBundle{TraceID: args[0], Spans: spans, Logs: logs}
 			if relationships {
 				if err := bundle.resolveRelationships(); err != nil {
 					return err
 				}
 			}
-			return encoder.Encode(bundle)
-		}),
+			return writeJSON(cmd, bundle, true)
+		},
 	}
 	cmd.Flags().BoolVar(&relationships, "relationships", false, "resolve span parents and log references")
 	return cmd

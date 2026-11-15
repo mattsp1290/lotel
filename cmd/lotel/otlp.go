@@ -18,21 +18,20 @@ func otlpQueryCommand(signal string) *cobra.Command {
 		Short: "Query complete OTLP resource envelopes (JSON output)",
 		Long:  "Query complete OTLP resource envelopes. Time filters select overlapping resource time ranges and return the entire envelope, including profile dictionaries. Limits count resource envelopes.",
 		Args:  cobra.NoArgs,
-		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+		RunE: withDatabaseJSON(func(cmd *cobra.Command, args []string, db *sql.DB) (any, error) {
 			opts, err := parseQueryOpts(service, since, until, limit)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			results, err := storage.QueryOTLP(db, signal, opts)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if results == nil {
 				results = []storage.OTLPResult{}
 			}
-			printJSON(results)
-			return nil
-		}),
+			return results, nil
+		}, true),
 	}
 	if name == "otlp" {
 		cmd.Flags().StringVar(&signal, "signal", "", "telemetry signal: traces, metrics, logs, or profiles (required)")
