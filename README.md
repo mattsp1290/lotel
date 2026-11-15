@@ -194,6 +194,7 @@ lotel --version
 | Command | Description |
 |---------|-------------|
 | `lotel --version` | Show the executable version |
+| `lotel commands` | List registered commands and flags as JSON |
 | `lotel upgrade [--check] [--json] [--version vX.Y.Z]` | Check for or install a release |
 | `lotel start [--wait] [--config <path>]` | Start the OTel Collector container |
 | `lotel start --backend native [--wait]` | Start the bundled Collector without Docker, with automatic ingestion |
@@ -215,6 +216,16 @@ lotel --version
 | `lotel query genai usage` | Group token usage, errors, and latency |
 | `lotel query aggregate` | Compute avg/min/max for a metric |
 | `lotel prune` | Delete telemetry older than threshold |
+
+`lotel commands` returns a versioned catalog of registered visible commands and
+their visible flags. Each entry includes its path, usage text, summary, whether
+it can run, and its flags. Flag defaults are strings as shown by the CLI, and
+`inherited` identifies flags inherited from a parent command. The catalog
+excludes Cobra's automatically generated help and completion commands and flags.
+The set of commands and their defaults can change between lotel versions.
+
+The catalog does not describe all required arguments, validation rules, result
+schemas, or exit codes. Use the command's help and documentation for those.
 
 ## Assert signal evidence
 
