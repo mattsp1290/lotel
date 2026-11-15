@@ -245,7 +245,7 @@ func main() {
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd, queryLogsCmd} {
 		cmd.Flags().StringArray("attr", nil, "attribute key=value; repeat for AND; matches compact JSON string form, null never matches")
 	}
-	queryCmd.AddCommand(metricDifferenceCommand(), recentCommand(), discoveryCommand("services"), discoveryCommand("operations"), dependenciesCommand(), spanStatsCommand(), logStatsCommand(), traceCommand(), queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
+	queryCmd.AddCommand(metricDifferenceCommand(), pageCommand(), recentCommand(), discoveryCommand("services"), discoveryCommand("operations"), dependenciesCommand(), spanStatsCommand(), logStatsCommand(), traceCommand(), queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
 
 	pruneCmd := pruneCommand()
 
