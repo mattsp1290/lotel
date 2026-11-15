@@ -72,10 +72,13 @@ func requestNativeShutdown(ctx context.Context, state *State) (nativeShutdownRes
 func nativeStatus(ctx context.Context, state *State) (*Status, error) {
 	status, err := requestNativeStatus(ctx, state)
 	if errors.Is(err, errNativeUnavailable) {
-		return &Status{Backend: "native"}, nil
+		return &Status{Backend: "native", ConfigPath: state.ConfigPath}, nil
 	}
-	if err == nil && status.Running {
-		status.Uptime = time.Since(state.StartedAt).Truncate(time.Second).String()
+	if err == nil {
+		status.ConfigPath = state.ConfigPath
+		if status.Running {
+			status.Uptime = time.Since(state.StartedAt).Truncate(time.Second).String()
+		}
 	}
 	return status, err
 }

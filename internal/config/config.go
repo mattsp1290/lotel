@@ -103,6 +103,10 @@ service:
 // It looks for a config in the current working directory first, then
 // falls back to a default config in ~/.lotel/.
 func ResolvePaths() (configPath, dataPath string, err error) {
+	return ResolvePathsWithConfig("")
+}
+
+func ResolvePathsWithConfig(override string) (configPath, dataPath string, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", "", fmt.Errorf("getting home directory: %w", err)
@@ -113,6 +117,23 @@ func ResolvePaths() (configPath, dataPath string, err error) {
 		if err := os.MkdirAll(filepath.Join(dataPath, sub), 0o755); err != nil {
 			return "", "", fmt.Errorf("creating data subdirectory %s: %w", sub, err)
 		}
+	}
+
+	if override != "" {
+		configPath, err = filepath.Abs(override)
+		if err != nil {
+			return "", "", err
+		}
+		managed := filepath.Join(home, LotelDir, DefaultConfigName)
+		if configPath == managed {
+			if err := refreshManagedConfig(configPath); err != nil {
+				return "", "", err
+			}
+		}
+		if _, err := os.Stat(configPath); err != nil {
+			return "", "", fmt.Errorf("collector config: %w", err)
+		}
+		return configPath, dataPath, nil
 	}
 
 	// Look for config in CWD first (project-local config).

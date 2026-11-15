@@ -34,6 +34,7 @@ type State struct {
 type Status struct {
 	Backend       string `json:"backend,omitempty"`
 	PID           int    `json:"pid,omitempty"`
+	ConfigPath    string `json:"config_path,omitempty"`
 	Running       bool   `json:"running"`
 	ContainerID   string `json:"container_id,omitempty"`
 	ContainerName string `json:"container_name,omitempty"`
@@ -69,6 +70,10 @@ func readState() (*State, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readStateFile(path)
+}
+
+func readStateFile(path string) (*State, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -279,6 +284,7 @@ func GetStatus(ctx context.Context) (*Status, error) {
 		status.ContainerID = state.ContainerID
 		status.ContainerName = state.ContainerName
 		status.Image = state.Image
+		status.ConfigPath = state.ConfigPath
 		status.Uptime = time.Since(state.StartedAt).Truncate(time.Second).String()
 	} else {
 		status.ContainerName = containerName

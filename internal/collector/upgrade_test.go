@@ -1,0 +1,185 @@
+package collector
+
+import (
+	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestInspectForUpgradeIsReadOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name, ids, running                              string
+		listError, inspectError, wantRunning, wantError bool
+	}{
+		{"absent", "", "", false, false, false, false},
+		{"stopped", "0123456789ab", "false", false, false, false, false},
+		{"running", "0123456789ab", "true", false, false, true, false},
+		{"daemon unavailable", "", "", true, false, false, true},
+		{"inspect failed", "0123456789ab", "true", false, true, false, true},
+		{"bad id", "unexpected", "true", false, false, false, true},
+		{"multiple containers", "0123456789ab 123456789abc", "true", false, false, false, true},
+		{"bad running state", "0123456789ab", "unknown", false, false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, bin := t.TempDir(), t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("PATH", bin)
+			t.Setenv("TEST_IDS", tc.ids)
+			t.Setenv("TEST_RUNNING", tc.running)
+			if tc.listError {
+				t.Setenv("TEST_LIST_ERROR", "1")
+			}
+			if tc.inspectError {
+				t.Setenv("TEST_INSPECT_ERROR", "1")
+			}
+			program := `#!/bin/sh
+case "$1" in
+ps) [ -z "$TEST_LIST_ERROR" ] || exit 125; printf '%s' "$TEST_IDS";;
+inspect) [ -z "$TEST_INSPECT_ERROR" ] || exit 125; printf '%s' "$TEST_RUNNING";;
+*) exit 1;;
+esac
+`
+			if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(program), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			statePath := filepath.Join(home, stateDir, stateFile)
+			if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			original := []byte(`{"config_path":"/custom/config.yaml"}`)
+			if err := os.WriteFile(statePath, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			status, err := InspectForUpgrade(context.Background())
+			if (err != nil) != tc.wantError {
+				t.Fatalf("status=%+v err=%v", status, err)
+			}
+			if err == nil && status.Running != tc.wantRunning {
+				t.Fatalf("status=%+v", status)
+			}
+			if tc.wantRunning && status.ConfigPath != "/custom/config.yaml" {
+				t.Fatalf("status=%+v", status)
+			}
+			got, err := os.ReadFile(statePath)
+			if err != nil || string(got) != string(original) {
+				t.Fatalf("state=%q err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestInspectForUpgradeWithoutDocker(t *testing.T) {
+	for _, recorded := range []bool{false, true} {
+		t.Run(map[bool]string{false: "fresh native installation", true: "recorded Docker installation"}[recorded], func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("PATH", t.TempDir())
+			if recorded {
+				if err := writeState(&State{ConfigPath: "/custom/docker.yaml"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			status, err := InspectForUpgrade(context.Background())
+			if recorded {
+				if err == nil {
+					t.Fatalf("accepted unknown Docker state: %+v", status)
+				}
+			} else {
+				if err != nil || status.Running {
+					t.Fatalf("status=%+v err=%v", status, err)
+				}
+				if _, err := os.Stat(filepath.Join(home, stateDir)); !os.IsNotExist(err) {
+					t.Fatalf("created state directory: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestInspectForUpgradeRejectsUnknownBackend(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	if err := writeState(&State{Backend: "unknown", ConfigPath: "/custom/config.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := InspectForUpgrade(context.Background()); err == nil {
+		t.Fatalf("accepted unknown backend: %+v", status)
+	}
+}
+
+func TestInspectNativeForUpgradeAuthenticatesWithoutMutatingState(t *testing.T) {
+	for _, authenticated := range []bool{true, false} {
+		t.Run(map[bool]string{true: "authenticated", false: "wrong nonce"}[authenticated], func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("PATH", t.TempDir())
+			dir, err := os.MkdirTemp("", "lotel-upgrade-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(dir) })
+			path := filepath.Join(dir, "control.sock")
+			listener, err := net.Listen("unix", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/status" {
+					t.Errorf("mutating request: %s %s", r.Method, r.URL.Path)
+				}
+				if r.Header.Get("Authorization") != "Bearer correct" {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				json.NewEncoder(w).Encode(Status{Backend: "native", Running: true, Healthy: true, PID: 123})
+			})}
+			go server.Serve(listener)
+			defer server.Close()
+			token := "wrong"
+			if authenticated {
+				token = "correct"
+			}
+			if err := writeState(&State{Backend: "native", ConfigPath: "/custom/native.yaml", ControlSocket: path, ControlToken: token}); err != nil {
+				t.Fatal(err)
+			}
+			statePath, err := stateFilePath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := InspectForUpgrade(context.Background())
+			if authenticated {
+				if err != nil || !status.Running || status.Backend != "native" || status.ConfigPath != "/custom/native.yaml" {
+					t.Fatalf("status=%+v err=%v", status, err)
+				}
+			} else if err == nil {
+				t.Fatalf("accepted unauthenticated status: %+v", status)
+			}
+			after, err := os.ReadFile(statePath)
+			if err != nil || string(before) != string(after) {
+				t.Fatalf("modified state: %s -> %s, err=%v", before, after, err)
+			}
+		})
+	}
+}
+
+func TestInspectForUpgradeAbsentCreatesNoState(t *testing.T) {
+	home, bin := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", bin)
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectForUpgrade(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, stateDir)); !os.IsNotExist(err) {
+		t.Fatalf("created state directory: %v", err)
+	}
+}
