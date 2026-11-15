@@ -131,3 +131,26 @@ func TestQueryFiltersEscaping(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryGenAIEventIdentity(t *testing.T) {
+	db, err := OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, path := ingestGenAIFixtures(t)
+	if _, err := IngestAll(db, path); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO logs(timestamp,event_name,service_name,trace_id,span_id,date) VALUES(CURRENT_TIMESTAMP,'gen_ai.other','other','other-trace','1111111111111111',CURRENT_DATE)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, err := QueryGenAICalls(db, GenAIOptions{QueryOptions: QueryOptions{TraceID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls[0].EventCount != 1 {
+		t.Fatalf("event count crossed traces: %d", calls[0].EventCount)
+	}
+}

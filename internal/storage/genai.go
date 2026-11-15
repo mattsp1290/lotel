@@ -97,24 +97,26 @@ func QueryGenAICalls(db *sql.DB, opts GenAIOptions) ([]GenAICall, error) {
 		return nil, err
 	}
 	columns := []string{"trace_id", "span_id", "COALESCE(parent_span_id,'')", "name", "service_name", "start_time", "COALESCE(duration_ns,0)/1000000.0", "COALESCE(status_code,0)", "COALESCE(e.n,0)"}
+	expressions := make(map[string]string, len(genAIAliases))
 	for _, alias := range genAIAliases {
-		columns = append(columns, aliasExpression(alias.keys))
+		expressions[alias.field] = aliasExpression(alias.keys)
+		columns = append(columns, expressions[alias.field])
 	}
 	errorExpr := `COALESCE(json_extract_string(attributes,'$."error.type"'),CASE WHEN status_code=2 THEN 'error' ELSE '' END)`
 	columns = append(columns, errorExpr, `COALESCE(json_extract_string(attributes,'$."gen_ai.response.finish_reasons"'),'')`)
 	if opts.Content {
 		columns = append(columns, "CAST(attributes AS VARCHAR)")
 	}
-	query := "SELECT " + strings.Join(columns, ",") + ` FROM traces LEFT JOIN (SELECT span_id AS event_span_id,COUNT(*) AS n FROM logs WHERE starts_with(event_name,'gen_ai.') GROUP BY span_id) e ON traces.span_id=e.event_span_id WHERE EXISTS(SELECT 1 FROM unnest(json_keys(attributes)) AS keys(k) WHERE starts_with(k,'gen_ai.'))`
+	query := "SELECT " + strings.Join(columns, ",") + ` FROM traces LEFT JOIN (SELECT trace_id AS event_trace_id,span_id AS event_span_id,COUNT(*) AS n FROM logs WHERE starts_with(event_name,'gen_ai.') GROUP BY trace_id,span_id) e ON traces.trace_id=e.event_trace_id AND traces.span_id=e.event_span_id WHERE EXISTS(SELECT 1 FROM unnest(json_keys(attributes)) AS keys(k) WHERE starts_with(k,'gen_ai.'))`
 	args := buildWhere(&query, opts.QueryOptions, "start_time")
 	if opts.TraceID != "" {
 		query += " AND trace_id=?"
 		args = append(args, strings.ToLower(opts.TraceID))
 	}
 	filters := []struct{ value, expr string }{
-		{opts.Provider, aliasExpression(genAIAliases[1].keys)},
-		{opts.Operation, aliasExpression(genAIAliases[0].keys)},
-		{opts.ConversationID, aliasExpression(genAIAliases[5].keys)},
+		{opts.Provider, expressions["provider"]},
+		{opts.Operation, expressions["operation"]},
+		{opts.ConversationID, expressions["conversation_id"]},
 	}
 	for _, filter := range filters {
 		if filter.value != "" {
@@ -123,7 +125,7 @@ func QueryGenAICalls(db *sql.DB, opts GenAIOptions) ([]GenAICall, error) {
 		}
 	}
 	if opts.Model != "" {
-		query += " AND (" + aliasExpression(genAIAliases[2].keys) + "=? OR " + aliasExpression(genAIAliases[3].keys) + "=?)"
+		query += " AND (" + expressions["request_model"] + "=? OR " + expressions["response_model"] + "=?)"
 		args = append(args, opts.Model, opts.Model)
 	}
 	if opts.ErrorsOnly {
@@ -155,18 +157,29 @@ func QueryGenAICalls(db *sql.DB, opts GenAIOptions) ([]GenAICall, error) {
 			rows.Close()
 			return nil, err
 		}
-		call.Operation, call.Provider, call.RequestModel, call.ResponseModel, call.ResponseID, call.ConversationID, call.AgentName, call.ToolName = values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7]
-		call.InputTokens = tokenValue(values[8])
-		call.OutputTokens = tokenValue(values[9])
-		call.CacheReadInputTokens = tokenValue(values[10])
-		call.CacheWriteInputTokens = tokenValue(values[11])
-		call.ReasoningOutputTokens = tokenValue(values[12])
+		fields := make(map[string]string, len(genAIAliases))
+		for i, alias := range genAIAliases {
+			fields[alias.field] = values[i]
+		}
+		call.Operation = fields["operation"]
+		call.Provider = fields["provider"]
+		call.RequestModel = fields["request_model"]
+		call.ResponseModel = fields["response_model"]
+		call.ResponseID = fields["response_id"]
+		call.ConversationID = fields["conversation_id"]
+		call.AgentName = fields["agent_name"]
+		call.ToolName = fields["tool_name"]
+		call.InputTokens = tokenValue(fields["input_tokens"])
+		call.OutputTokens = tokenValue(fields["output_tokens"])
+		call.CacheReadInputTokens = tokenValue(fields["cache_read_input_tokens"])
+		call.CacheWriteInputTokens = tokenValue(fields["cache_write_input_tokens"])
+		call.ReasoningOutputTokens = tokenValue(fields["reasoning_output_tokens"])
 		if reasons != "" {
 			_ = json.Unmarshal([]byte(reasons), &call.FinishReasons)
 		}
 		if opts.Content {
 			var content map[string]any
-			if err := json.Unmarshal([]byte(attrs), &content); err != nil {
+			if err := decodeJSON([]byte(attrs), &content); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -192,7 +205,7 @@ func QueryGenAICalls(db *sql.DB, opts GenAIOptions) ([]GenAICall, error) {
 func decodeContent(value any) any {
 	if text, ok := value.(string); ok {
 		var decoded any
-		if json.Unmarshal([]byte(text), &decoded) == nil {
+		if decodeJSON([]byte(text), &decoded) == nil {
 			switch decoded.(type) {
 			case []any, map[string]any:
 				return decoded

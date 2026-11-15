@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -138,11 +139,11 @@ func QueryTraces(db *sql.DB, opts QueryOptions) ([]TraceResult, error) {
 			r.ParentSpanID = parentSpanID.String
 		}
 		if attrsJSON.Valid {
-			if err := json.Unmarshal([]byte(attrsJSON.String), &r.Attributes); err != nil {
+			if err := decodeJSON([]byte(attrsJSON.String), &r.Attributes); err != nil {
 				return nil, fmt.Errorf("decoding attributes: %w", err)
 			}
 		}
-		if err := json.Unmarshal([]byte(metadata), &r); err != nil {
+		if err := decodeJSON([]byte(metadata), &r); err != nil {
 			return nil, fmt.Errorf("decoding metadata: %w", err)
 		}
 		results = append(results, r)
@@ -192,11 +193,11 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 			r.Unit = unit.String
 		}
 		if attrsJSON.Valid {
-			if err := json.Unmarshal([]byte(attrsJSON.String), &r.Attributes); err != nil {
+			if err := decodeJSON([]byte(attrsJSON.String), &r.Attributes); err != nil {
 				return nil, fmt.Errorf("decoding attributes: %w", err)
 			}
 		}
-		if err := json.Unmarshal([]byte(metadata), &r); err != nil {
+		if err := decodeJSON([]byte(metadata), &r); err != nil {
 			return nil, fmt.Errorf("decoding metadata: %w", err)
 		}
 		results = append(results, r)
@@ -245,11 +246,11 @@ func QueryLogs(db *sql.DB, opts QueryOptions) ([]LogResult, error) {
 			r.SpanID = spanID.String
 		}
 		if attrsJSON.Valid {
-			if err := json.Unmarshal([]byte(attrsJSON.String), &r.Attributes); err != nil {
+			if err := decodeJSON([]byte(attrsJSON.String), &r.Attributes); err != nil {
 				return nil, fmt.Errorf("decoding attributes: %w", err)
 			}
 		}
-		if err := json.Unmarshal([]byte(metadata), &r); err != nil {
+		if err := decodeJSON([]byte(metadata), &r); err != nil {
 			return nil, fmt.Errorf("decoding metadata: %w", err)
 		}
 		results = append(results, r)
@@ -370,4 +371,11 @@ func buildFilters(query *string, opts QueryOptions, nameColumn string) []any {
 		args = append(args, `$."`+key+`"`, attr.Value)
 	}
 	return args
+}
+
+// decodeJSON keeps integers exact in interface-valued telemetry fields.
+func decodeJSON(data []byte, dest any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode(dest)
 }
