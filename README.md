@@ -227,6 +227,7 @@ lotel --version
 | `lotel query genai usage` | Group token usage, errors, and latency |
 | `lotel query aggregate` | Compute avg/min/max for a metric |
 | `lotel query metric-difference` | Compare two exact retained cumulative integer sum points |
+| `lotel query metric-delta-total` | Total contiguous retained delta integer sum points |
 | `lotel prune` | Delete telemetry older than threshold |
 
 `lotel commands` returns a versioned catalog of registered visible commands and
@@ -303,7 +304,24 @@ leave history incomplete, including missing resets or missing-value markers.
 Results use retained envelopes only. Ingestion canonicalizes top-level JSON objects;
 duplicate top-level resourceMetrics fields can lose earlier values. Full backfill
 repeats that loss and cannot recover or detect it.
-The selector is limited to 4 MiB. The scan stops with an indeterminate error
+`query metric-delta-total` uses the same selector shape, but requires a delta
+monotonic sum (`aggregationTemporality` 1). It sums nonnegative integer values
+whose nonzero start and end times exactly cover the requested `(from, to]`
+window. For example:
+
+```bash
+lotel query metric-delta-total --selector delta-selector.json --from-ns 1700000000000000001 --to-ns 1700000000000000003
+```
+
+The result contains the exact total as a decimal string and the number of
+points. Missing, overlapping, duplicate, flagged, fractional, negative or
+partially overlapping points make the result indeterminate. A point with an
+unknown start after the requested start also makes it indeterminate. As with
+the cumulative comparison, the result is based only on retained data and
+assumes a single writer. Undetected losses and the ingestion limitations above
+can make the observed total incomplete even when observed intervals are contiguous.
+
+Both commands use the same resource limits and identity checks. The selector is limited to 4 MiB. The scan stops with an indeterminate error
 after 100,000 envelopes, 4 MiB in one envelope, 64 MiB of
 envelope data, 100,000 points across all streams, or one million JSON tokens.
 Every retained metrics envelope must decode completely. Unknown or malformed

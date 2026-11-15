@@ -129,7 +129,7 @@ func decodeMetricEnvelope(data []byte) (*metricpb.MetricsData, error) {
 	}
 	return m, nil
 }
-func parseMetricSelection(ctx context.Context, data []byte) (metricSelection, error) {
+func parseMetricSelection(ctx context.Context, data []byte, temporality metricpb.AggregationTemporality) (metricSelection, error) {
 	var id metricSelection
 	if len(data) > MetricSelectorByteLimit {
 		return id, fmt.Errorf("metric selector exceeds size limit")
@@ -161,7 +161,10 @@ func parseMetricSelection(ctx context.Context, data []byte) (metricSelection, er
 	}
 	metric := s.Metrics[0]
 	sum := metric.GetSum()
-	if metric.Name == "" || sum == nil || !sum.IsMonotonic || sum.AggregationTemporality != metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE || len(sum.DataPoints) != 1 || sum.DataPoints[0] == nil {
+	if metric.Name == "" || sum == nil || !sum.IsMonotonic || sum.AggregationTemporality != temporality || len(sum.DataPoints) != 1 || sum.DataPoints[0] == nil {
+		if temporality == metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA {
+			return id, fmt.Errorf("selector must contain one delta monotonic sum point")
+		}
 		return id, fmt.Errorf("selector must contain one cumulative monotonic sum point")
 	}
 	if id.resource, err = canonicalResource(r.Resource, true); err != nil {
@@ -196,11 +199,22 @@ func parseMetricSelection(ctx context.Context, data []byte) (metricSelection, er
 	return id, nil
 }
 
-type MetricSelector struct{ identity metricSelection }
+type MetricSelector struct {
+	identity    metricSelection
+	temporality metricpb.AggregationTemporality
+}
 
 func PrepareMetricSelector(ctx context.Context, data []byte) (MetricSelector, error) {
-	id, err := parseMetricSelection(ctx, data)
-	return MetricSelector{identity: id}, err
+	return prepareMetricSelector(ctx, data, metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE)
+}
+
+func PrepareDeltaMetricSelector(ctx context.Context, data []byte) (MetricSelector, error) {
+	return prepareMetricSelector(ctx, data, metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA)
+}
+
+func prepareMetricSelector(ctx context.Context, data []byte, temporality metricpb.AggregationTemporality) (MetricSelector, error) {
+	id, err := parseMetricSelection(ctx, data, temporality)
+	return MetricSelector{identity: id, temporality: temporality}, err
 }
 
 func canonicalAttributeMap(attrs []*commonpb.KeyValue) (map[string][]byte, error) {
