@@ -134,8 +134,7 @@ func containerExists() bool {
 	return err == nil
 }
 
-// Start launches the collector as a Docker container.
-func Start(ctx context.Context, configPath, dataPath string) error {
+func startDocker(ctx context.Context, configPath, dataPath string) error {
 	absConfig, err := filepath.Abs(configPath)
 	if err != nil {
 		return err
@@ -159,7 +158,7 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 			return nil
 		}
 		fmt.Println("Collector config or image changed; restarting.")
-		if err := Stop(ctx); err != nil {
+		if err := stopDocker(ctx); err != nil {
 			return err
 		}
 	}
@@ -230,15 +229,7 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 	return nil
 }
 
-// Stop terminates the managed collector.
-func Stop(ctx context.Context) error {
-	state, err := readState()
-	if err != nil {
-		return err
-	}
-	if state != nil && state.Backend == "native" {
-		return stopNative(ctx, state)
-	}
+func stopDocker(ctx context.Context) error {
 	if !isContainerRunning() && !containerExists() {
 		_ = removeState()
 		fmt.Println("No collector is running.")

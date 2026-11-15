@@ -30,7 +30,7 @@ func TestStopNativeCleansCrashedSocketWithoutSignalingPID(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := StopManaged(ctx); err != nil {
+	if err := Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if state, err := readState(); err != nil || state != nil {
@@ -60,7 +60,7 @@ func TestStopNativeRetainsStateWhenOwnershipCannotBeVerified(t *testing.T) {
 	if err := writeState(state); err != nil {
 		t.Fatal(err)
 	}
-	if err := StopManaged(context.Background()); err == nil {
+	if err := Stop(context.Background()); err == nil {
 		t.Fatal("stopped an unverified collector")
 	}
 	if state, err := readState(); err != nil || state == nil {

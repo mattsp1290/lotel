@@ -42,7 +42,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			if err := collector.StartBackend(ctx, configPath, dataPath, backend); err != nil {
+			if err := collector.Start(ctx, configPath, dataPath, backend); err != nil {
 				return err
 			}
 			if waitHealthy {
@@ -64,7 +64,7 @@ func main() {
 		Use:   "stop",
 		Short: "Stop the OTel Collector",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return collector.StopManaged(cmd.Context())
+			return collector.Stop(cmd.Context())
 		},
 	}
 
