@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"github.com/mattsp1290/lotel/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -17,12 +18,8 @@ func otlpQueryCommand(signal string) *cobra.Command {
 		Short: "Query complete OTLP resource envelopes (JSON output)",
 		Long:  "Query complete OTLP resource envelopes. Time filters select overlapping resource time ranges and return the entire envelope, including profile dictionaries. Limits count resource envelopes.",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
 			opts, err := parseQueryOpts(service, since, until, limit)
-			if err != nil {
-				return err
-			}
-			db, err := openDB()
 			if err != nil {
 				return err
 			}
@@ -35,7 +32,7 @@ func otlpQueryCommand(signal string) *cobra.Command {
 			}
 			printJSON(results)
 			return nil
-		},
+		}),
 	}
 	if name == "otlp" {
 		cmd.Flags().StringVar(&signal, "signal", "", "telemetry signal: traces, metrics, logs, or profiles (required)")

@@ -38,17 +38,19 @@ Core command surface:
 Use this loop by default unless the task explicitly does not involve runtime behavior.
 
 ```bash
-# 1) Ensure collector is up
+# 1) Ensure collection and automatic ingestion are up
 go build -o lotel ./cmd/lotel
 ./lotel start --wait
 ./lotel health
+./lotel status
 
 # 2) Run app/tests that emit OTLP telemetry
 #    OTLP gRPC: localhost:4317
 #    OTLP HTTP: localhost:4318
 
-# 3) Ingest fresh telemetry
-./lotel ingest
+# 3) Wait for SDK export, Collector batching, and automatic ingestion
+# Check ingestion.last_success and ingestion.last_error in status.
+./lotel status
 
 # 4) Query and verify expected behavior
 ./lotel query traces --service <service-name> --since 15m
@@ -61,7 +63,7 @@ go build -o lotel ./cmd/lotel
 Use while implementing features and refactors.
 
 1. Start `lotel` early in the session (`start --wait`, then `health`).
-2. After each meaningful code change + run, execute `ingest`.
+2. After each meaningful code change + run, wait for fresh telemetry to appear in queries. Use `ingest` for an immediate catch-up if needed.
 3. Confirm expected spans exist for key paths (main request, DB call, external API call).
 4. Check metrics for obvious regressions (latency growth, error spikes).
 5. For LLM features, confirm `./lotel query genai calls --service <svc> --since 10m` lists the expected model calls with non-null token counts.
@@ -79,7 +81,7 @@ Suggested checks:
 Use when behavior is wrong, flaky, or unexpectedly slow.
 
 1. Reproduce the issue locally with telemetry enabled.
-2. `ingest` immediately after reproduction.
+2. Wait for automatic ingestion after reproduction, or run `ingest` for an immediate catch-up.
 3. Inspect traces first for path/call timing and missing downstream spans.
 4. Correlate with logs/metrics in the same time window.
 5. Repeat after each fix attempt and compare outputs.
@@ -112,7 +114,8 @@ Checklist:
 Example gate commands:
 
 ```bash
-./lotel ingest
+./lotel health
+./lotel status
 ./lotel query traces --service <service-name> --since 1h --limit 500
 ./lotel query metrics --service <service-name> --since 1h --limit 500
 ./lotel query logs --service <service-name> --since 1h --limit 500

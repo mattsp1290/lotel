@@ -14,15 +14,15 @@ import (
 )
 
 func TestRunOptionsAndCancellation(t *testing.T) {
-	if err := Run(context.Background(), t.TempDir(), Options{}, nil); err != nil {
+	if err := New(Options{}).Run(context.Background(), t.TempDir(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := Run(context.Background(), t.TempDir(), Options{Enabled: true}, nil); err == nil {
+	if err := New(Options{Enabled: true}).Run(context.Background(), t.TempDir(), nil); err == nil {
 		t.Fatal("enabled ingestion accepted a zero interval")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := Run(ctx, t.TempDir(), Options{Enabled: true, Interval: time.Hour}, nil); err != nil {
+	if err := New(Options{Enabled: true, Interval: time.Hour}).Run(ctx, t.TempDir(), nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -31,7 +31,7 @@ func TestRunReleasesDatabaseForOtherProcesses(t *testing.T) {
 	if root := os.Getenv("LOTEL_INGESTION_TEST_ROOT"); root != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if err := Run(ctx, root, Options{Enabled: true, Interval: 50 * time.Millisecond}, func(err error) {
+		if err := New(Options{Enabled: true, Interval: 50 * time.Millisecond}).Run(ctx, root, func(err error) {
 			fmt.Fprintln(os.Stderr, err)
 		}); err != nil {
 			t.Fatal(err)
@@ -104,8 +104,9 @@ func TestRunRecoversAfterIngestionError(t *testing.T) {
 	defer cancel()
 	failures := make(chan error, 1)
 	done := make(chan error, 1)
+	worker := New(Options{Enabled: true, Interval: 10 * time.Millisecond})
 	go func() {
-		done <- Run(ctx, root, Options{Enabled: true, Interval: 10 * time.Millisecond}, func(err error) {
+		done <- worker.Run(ctx, root, func(err error) {
 			select {
 			case failures <- err:
 			default:
@@ -114,6 +115,9 @@ func TestRunRecoversAfterIngestionError(t *testing.T) {
 	}()
 	select {
 	case <-failures:
+		if status := worker.Status(); status.LastError == "" || !status.Running {
+			t.Fatalf("failure missing from status: %+v", status)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("ingestion did not report the unreadable source")
 	}
@@ -130,10 +134,17 @@ func TestRunRecoversAfterIngestionError(t *testing.T) {
 			var rows int
 			queryErr := db.QueryRow("SELECT count(*) FROM logs WHERE body='recovered ingestion'").Scan(&rows)
 			db.Close()
-			if queryErr == nil && rows == 1 {
+			if queryErr == nil && rows == 1 && worker.Status().LastSuccess != nil {
+				status := worker.Status()
+				if status.LastError != "" || !status.Running {
+					t.Fatalf("recovery missing from status: %+v", status)
+				}
 				cancel()
 				if err := <-done; err != nil {
 					t.Fatal(err)
+				}
+				if worker.Status().Running {
+					t.Fatal("stopped worker still reports running")
 				}
 				return
 			}

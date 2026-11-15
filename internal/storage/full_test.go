@@ -8,14 +8,13 @@ import (
 )
 
 func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
-	projectionSignals := []string{"traces", "metrics", "logs"}
 	root := t.TempDir()
 	db, err := OpenDB(filepath.Join(root, "lotel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, signal := range projectionSignals {
+	for signal := range ingestStatements {
 		fixture, err := os.ReadFile(filepath.Join("testdata", "genai", signal+".jsonl"))
 		if err != nil {
 			t.Fatal(err)
@@ -32,7 +31,7 @@ func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, signal := range projectionSignals {
+	for signal := range ingestStatements {
 		if _, err := db.Exec("DELETE FROM " + signal); err != nil {
 			t.Fatal(err)
 		}
@@ -40,7 +39,7 @@ func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
 	if _, err := IngestAll(db, root); err != nil {
 		t.Fatal(err)
 	}
-	for _, signal := range projectionSignals {
+	for signal := range ingestStatements {
 		var count int
 		if err := db.QueryRow("SELECT count(*) FROM " + signal).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("incremental ingestion restored %s rows without new bytes: %d, %v", signal, count, err)
@@ -51,7 +50,7 @@ func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, signal := range projectionSignals {
+		for signal := range ingestStatements {
 			want := first.Signals[signal].Records
 			var count int
 			if err := db.QueryRow("SELECT count(*) FROM " + signal).Scan(&count); err != nil {
@@ -66,8 +65,8 @@ func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for signal, signalReport := range report.Signals {
-		if signalReport.Records != 0 || signalReport.OTLPEnvelopes != 0 {
+	for signal := range ingestStatements {
+		if report.Signals[signal].Records != 0 {
 			t.Fatalf("incremental ingestion duplicated rebuilt %s", signal)
 		}
 	}
@@ -132,5 +131,59 @@ func TestReingestAllRollsBackRowsAndCursors(t *testing.T) {
 	}
 	if afterCount != beforeCount || afterOffset != beforeOffset {
 		t.Fatalf("failed rebuild changed rows or cursor: count %d to %d, offset %d to %d", beforeCount, afterCount, beforeOffset, afterOffset)
+	}
+}
+
+func TestReingestAllIncludesCompleteOTLPAndProfiles(t *testing.T) {
+	root := t.TempDir()
+	db, err := OpenDB(filepath.Join(root, "lotel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	payload := `{"resourceProfiles":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"rebuilt-profiles"}}]},"scopeProfiles":[{"profiles":[{"timeUnixNano":"1794700000000000001","durationNano":"8","samples":[{"values":["1"]}]}]}]}]}`
+	writeOTLPSignal(t, root, "profiles", payload+"\n")
+	for signal := range ingestStatements {
+		fixture, err := os.ReadFile(filepath.Join("testdata", "genai", signal+".jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeOTLPSignal(t, root, signal, string(fixture))
+	}
+	first, err := IngestAll(db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		report, err := ReingestAll(db, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, descriptor := range otlpSignals {
+			signal := descriptor.name
+			var envelopes int
+			if err := db.QueryRow("SELECT count(*) FROM otlp_envelopes WHERE signal=?", signal).Scan(&envelopes); err != nil {
+				t.Fatal(err)
+			}
+			if envelopes != first.Signals[signal].OTLPEnvelopes || envelopes == 0 {
+				t.Fatalf("rebuilt %s has %d envelopes, want %d", signal, envelopes, first.Signals[signal].OTLPEnvelopes)
+			}
+			if report.Signals[signal].Records != first.Signals[signal].Records {
+				t.Fatalf("rebuilt %s records changed", signal)
+			}
+		}
+		rows, err := QueryOTLP(db, "profiles", QueryOptions{Service: "rebuilt-profiles"})
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("profile query after rebuild = %v, %v", rows, err)
+		}
+		next, err := IngestAll(db, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for signal, signalReport := range next.Signals {
+			if signalReport.Records != 0 || signalReport.OTLPEnvelopes != 0 {
+				t.Fatalf("incremental ingestion duplicated rebuilt %s: %+v", signal, signalReport)
+			}
+		}
 	}
 }

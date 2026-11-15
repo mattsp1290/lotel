@@ -82,3 +82,39 @@ func TestNativeConfigRejectsInvalidIngestion(t *testing.T) {
 		})
 	}
 }
+
+func TestCollectorConfigPreservesDockerValuesAndDefaultsIngestion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "docker.yaml")
+	input := `receivers:
+  prometheus:
+    config:
+      scrape_configs: []
+exporters:
+  file/traces:
+    path: /data/traces/traces.jsonl
+service: {}
+`
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ReadCollector(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Ingestion.Enabled || cfg.Ingestion.Interval != 2*time.Second {
+		t.Fatalf("defaults: %+v", cfg.Ingestion)
+	}
+	if !strings.Contains(string(cfg.YAML), "/data/traces/traces.jsonl") || !strings.Contains(string(cfg.YAML), "prometheus:") {
+		t.Fatalf("Docker config was adapted as native config: %s", cfg.YAML)
+	}
+	if err := os.WriteFile(path, []byte(input+"ingestion:\n  enabled: false\n  interval: 5s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = ReadCollector(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Ingestion.Enabled || cfg.Ingestion.Interval != 5*time.Second || strings.Contains(string(cfg.YAML), "ingestion:") {
+		t.Fatalf("lotel settings leaked into Docker config: %+v\n%s", cfg.Ingestion, cfg.YAML)
+	}
+}

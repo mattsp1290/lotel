@@ -9,16 +9,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func nativeRunCommand() *cobra.Command {
-	var configPath, dataPath, socket, token string
+func runtimeRunCommand() *cobra.Command {
+	var configPath, dataPath, socket, token, backend string
 	command := &cobra.Command{
 		Use: "run-collector", Hidden: true, Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
-			return collector.RunNative(ctx, configPath, dataPath, socket, token)
+			return collector.Run(ctx, collector.RuntimeOptions{Backend: backend, ConfigPath: configPath, DataPath: dataPath, ControlSocket: socket, ControlToken: token})
 		},
 	}
+	command.Flags().StringVar(&backend, "backend", "native", "collector backend")
 	command.Flags().StringVar(&configPath, "config", "", "collector configuration path")
 	command.Flags().StringVar(&dataPath, "data", "", "telemetry data directory")
 	command.Flags().StringVar(&socket, "control", "", "private control socket")
