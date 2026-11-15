@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -57,13 +56,15 @@ func setupCommand() *cobra.Command {
 			if path == "" || !utf8.ValidString(path) {
 				return fmt.Errorf("--path must be nonempty UTF-8")
 			}
-			info, err := os.Stat(path)
+			directoryPath := path + string(os.PathSeparator) + "."
+			if filepath.VolumeName(path) == path && !filepath.IsAbs(path) {
+				directoryPath = path + "."
+			}
+			root, err := os.OpenRoot(directoryPath)
 			if err != nil {
 				return fmt.Errorf("inspect project directory: %w", err)
 			}
-			if !info.IsDir() {
-				return fmt.Errorf("project path must be a directory")
-			}
+			defer root.Close()
 			report := setupReport{
 				SchemaVersion: 1, Path: path, Candidates: []setupCandidate{}, Skipped: []setupSkipped{},
 				ExporterGuide: "https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/",
@@ -71,7 +72,7 @@ func setupCommand() *cobra.Command {
 			}
 			indices := map[string]int{}
 			for _, manifest := range setupManifests {
-				info, err := os.Lstat(filepath.Join(path, manifest.name))
+				info, err := root.Lstat(manifest.name)
 				if errors.Is(err, os.ErrNotExist) {
 					continue
 				}
@@ -99,9 +100,7 @@ func setupCommand() *cobra.Command {
 				report.Candidates[index].Manifests = append(report.Candidates[index].Manifests, manifest.name)
 			}
 			sort.Slice(report.Candidates, func(i, j int) bool { return report.Candidates[i].Ecosystem < report.Candidates[j].Ecosystem })
-			encoder := json.NewEncoder(cmd.OutOrStdout())
-			encoder.SetIndent("", "  ")
-			return encoder.Encode(report)
+			return writeJSON(cmd, report, true)
 		},
 	}
 	cmd.Flags().BoolVar(&recommendOnly, "recommend-only", false, "inspect manifest names without changing files (required)")
