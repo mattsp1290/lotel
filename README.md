@@ -205,6 +205,7 @@ lotel --version
 | `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
 | `lotel assert signal` | Fail if a service has no indexed signal in a time window |
 | `lotel query traces` | Query traces (JSON output) |
+| `lotel query span-stats` | Summarize observed spans by service, name, and kind |
 | `lotel query services` | List observed services and their signals |
 | `lotel query operations` | List observed span names and kinds |
 | `lotel query trace <trace-id>` | Query a trace and its correlated logs (JSON output) |
@@ -297,6 +298,25 @@ Usage defaults to grouping by provider, model, and operation. It reports token
 totals, calls with missing usage, errors, and nearest-rank latency percentiles.
 For cumulative histograms, read the latest `query metrics --name <name>` point.
 `query aggregate` aggregates per-point sums without correcting cumulative temporality.
+
+`lotel query span-stats --since 15m` groups projected spans by service, name,
+and span kind. The start is required and can be a positive duration or an RFC3339
+timestamp. The end defaults to the time of the query; `--until` accepts an
+RFC3339 timestamp no later than that time. Both bounds are inclusive and match
+the projected span start time, which is stored at microsecond precision. For
+example, a span starting at `12:00:00.0000002` is stored at `12:00:00.000000`
+and does not match a window starting at `12:00:00.0000002`. `--service` filters
+before grouping, and `--limit` limits the sorted groups after aggregation.
+
+Each group reports the number of spans, the number with OpenTelemetry ERROR
+status, and their error rate over all spans in the group, including spans with
+unset status. Duration percentiles use nearest-rank observed nanosecond values.
+The report excludes negative durations and spans with missing start or end
+timestamps from the percentile samples. `duration_count` and
+`duration_excluded` show how many matched spans were included and excluded.
+Percentiles are null when no durations qualify. The report counts projected
+records, including duplicates. Sampling and missing telemetry mean the counts
+are local observations, not traffic estimates.
 
 `lotel query trace <trace-id>` returns one object with `trace_id`, `spans`, and
 `logs` arrays for all services and times. The ID must be 32 hexadecimal
