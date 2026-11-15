@@ -15,8 +15,9 @@ func TestManagedConfigRefresh(t *testing.T) {
 	}{
 		{"absent", "", true, false},
 		{"older", "# lotel-managed-config v1 old\n", true, false},
+		{"previous", "# lotel-managed-config v2 previous\n", true, false},
 		{"current", ManagedConfigHeader + "\ncustom", false, false},
-		{"future", "# lotel-managed-config v3 future\n", false, false},
+		{"future", "# lotel-managed-config v4 future\n", false, false},
 		{"legacy", "legacy config", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

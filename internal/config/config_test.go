@@ -6,6 +6,43 @@ import (
 	"testing"
 )
 
+func TestResolvePathsPreservesProjectConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cwd := t.TempDir()
+	original, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(original) })
+	path := filepath.Join(cwd, "lotel-collector.yaml")
+	const content = "receivers:\n  custom: {}\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := ResolvePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != canonical {
+		t.Fatalf("resolved config %q, want %q", got, canonical)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != content {
+		t.Fatalf("project config changed: %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, LotelDir, DefaultConfigName)); !os.IsNotExist(err) {
+		t.Fatalf("home config was created despite project config: %v", err)
+	}
+}
+
 func TestResolvePaths_DefaultConfig(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -42,7 +79,7 @@ func TestResolvePaths_DefaultConfig(t *testing.T) {
 	}
 
 	// Data subdirectories should exist.
-	for _, sub := range []string{"traces", "metrics", "logs"} {
+	for _, sub := range []string{"traces", "metrics", "logs", "profiles"} {
 		dir := filepath.Join(dataPath, sub)
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			t.Errorf("data subdirectory %s does not exist", sub)

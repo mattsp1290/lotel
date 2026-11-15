@@ -16,13 +16,14 @@ import (
 
 // State represents the persisted state of a running collector container.
 type State struct {
-	ContainerID   string    `json:"container_id"`
-	ContainerName string    `json:"container_name"`
-	Image         string    `json:"image"`
-	StartedAt     time.Time `json:"started_at"`
-	ConfigSHA256  string    `json:"config_sha256"`
-	ConfigPath    string    `json:"config_path"`
-	DataPath      string    `json:"data_path"`
+	ContainerID     string    `json:"container_id"`
+	ContainerName   string    `json:"container_name"`
+	Image           string    `json:"image"`
+	StartedAt       time.Time `json:"started_at"`
+	ConfigSHA256    string    `json:"config_sha256"`
+	ConfigPath      string    `json:"config_path"`
+	DataPath        string    `json:"data_path"`
+	ProfilesEnabled bool      `json:"profiles_enabled"`
 }
 
 // Status represents the current status of the collector.
@@ -152,7 +153,7 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 			fmt.Printf("Collector is already running (container %s).\n", containerName)
 			return nil
 		}
-		fmt.Println("Collector config or image changed; restarting.")
+		fmt.Println("Collector configuration or launch options changed; restarting.")
 		if err := Stop(ctx); err != nil {
 			return err
 		}
@@ -172,7 +173,7 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 	}
 
 	// Ensure data directories exist.
-	for _, sub := range []string{"traces", "metrics", "logs"} {
+	for _, sub := range []string{"traces", "metrics", "logs", "profiles"} {
 		if err := os.MkdirAll(filepath.Join(dataPath, sub), 0o755); err != nil {
 			return fmt.Errorf("creating data directory %s: %w", sub, err)
 		}
@@ -192,6 +193,8 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 		"-v", absData+":/data",
 		"-v", absConfig+":/etc/otelcol-contrib/config.yaml:ro",
 		defaultImage,
+		"--config=/etc/otelcol-contrib/config.yaml",
+		"--feature-gates=+service.profilesSupport",
 	)
 	out, err := cmd.Output()
 	if err != nil {
@@ -201,13 +204,14 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 	containerID := strings.TrimSpace(string(out))
 
 	newState := &State{
-		ContainerID:   containerID,
-		ContainerName: containerName,
-		Image:         defaultImage,
-		StartedAt:     time.Now(),
-		ConfigPath:    absConfig,
-		ConfigSHA256:  cfgHash,
-		DataPath:      absData,
+		ContainerID:     containerID,
+		ContainerName:   containerName,
+		Image:           defaultImage,
+		StartedAt:       time.Now(),
+		ConfigPath:      absConfig,
+		ConfigSHA256:    cfgHash,
+		DataPath:        absData,
+		ProfilesEnabled: true,
 	}
 	if err := writeState(newState); err != nil {
 		// Remove the container if we can't persist state.
@@ -321,5 +325,5 @@ func restartDecision(s *State, image, cfgPath, cfgHash string) (bool, string) {
 	if s.ConfigPath != cfgPath {
 		return false, fmt.Sprintf("collector is running with config %s; this directory resolves %s. Run 'lotel stop' first to switch.", s.ConfigPath, cfgPath)
 	}
-	return s.ConfigSHA256 != cfgHash, ""
+	return s.ConfigSHA256 != cfgHash || !s.ProfilesEnabled, ""
 }
