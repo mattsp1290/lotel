@@ -5,11 +5,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,11 +18,17 @@ func StartBackend(ctx context.Context, configPath, dataPath, backend string) err
 	if backend != "docker" && backend != "native" {
 		return fmt.Errorf("unknown backend %q; use docker or native", backend)
 	}
+	if backend == "native" && !nativeSupported() {
+		return errors.New("native collector is supported only on macOS and Linux; use --backend docker")
+	}
 	unlock, err := lockLifecycle()
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if backend == "native" {
 		return startNative(ctx, configPath, dataPath)
 	}
@@ -66,11 +69,11 @@ func lockLifecycle() (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockLifecycleFile(file); err != nil {
 		file.Close()
 		return nil, err
 	}
-	return func() { syscall.Flock(int(file.Fd()), syscall.LOCK_UN); file.Close() }, nil
+	return func() { unlockLifecycleFile(file); file.Close() }, nil
 }
 
 func startNative(ctx context.Context, configPath, dataPath string) error {
@@ -149,7 +152,7 @@ func startNative(ctx context.Context, configPath, dataPath string) error {
 	defer log.Close()
 	command := exec.Command(executable, "run-collector", "--config", configPath, "--data", dataPath, "--control", socket, "--token", token)
 	command.Stdout, command.Stderr = log, log
-	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	configureNativeProcess(command)
 	if err := command.Start(); err != nil {
 		return err
 	}
@@ -161,11 +164,18 @@ func startNative(ctx context.Context, configPath, dataPath string) error {
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	for {
+		if err := ctx.Err(); err != nil {
+			stopStartupChild(command, done)
+			return err
+		}
 		status, statusErr := nativeStatus(ctx, state)
 		if statusErr == nil && status.Healthy {
+			if err := ctx.Err(); err != nil {
+				stopStartupChild(command, done)
+				return err
+			}
 			if err := writeState(state); err != nil {
-				_, _ = nativeRequest(ctx, state, http.MethodPost, "/shutdown")
-				<-done
+				stopStartupChild(command, done)
 				return err
 			}
 			keepControl = true
@@ -176,102 +186,22 @@ func startNative(ctx context.Context, configPath, dataPath string) error {
 		case processErr := <-done:
 			return fmt.Errorf("native collector exited during startup (%v); inspect %s", processErr, logPath)
 		case <-ctx.Done():
-			_, _ = nativeRequest(context.Background(), state, http.MethodPost, "/shutdown")
-			command.Process.Signal(syscall.SIGTERM)
-			<-done
+			stopStartupChild(command, done)
 			return ctx.Err()
 		case <-deadline.C:
-			_, _ = nativeRequest(context.Background(), state, http.MethodPost, "/shutdown")
-			command.Process.Signal(syscall.SIGTERM)
-			<-done
+			stopStartupChild(command, done)
 			return fmt.Errorf("native collector did not become ready; inspect %s", logPath)
 		case <-tick.C:
 		}
 	}
 }
 
-var errNativeUnavailable = errors.New("native collector control is unavailable")
-
-func nativeRequest(ctx context.Context, state *State, method, path string) (*Status, error) {
-	if state.ControlSocket == "" || state.ControlToken == "" {
-		return nil, errNativeUnavailable
+func stopStartupChild(command *exec.Cmd, done <-chan error) {
+	_ = command.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		_ = command.Process.Kill()
+		<-done
 	}
-	transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", state.ControlSocket)
-	}}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 2 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, method, "http://lotel"+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+state.ControlToken)
-	response, err := client.Do(req)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
-			return nil, errNativeUnavailable
-		}
-		return nil, err
-	}
-	defer response.Body.Close()
-	if path == "/shutdown" && response.StatusCode == http.StatusAccepted {
-		return &Status{Backend: "native", Running: true}, nil
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("native collector control returned HTTP %d", response.StatusCode)
-	}
-	var status Status
-	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
-		return nil, err
-	}
-	return &status, nil
-}
-
-func nativeStatus(ctx context.Context, state *State) (*Status, error) {
-	status, err := nativeRequest(ctx, state, http.MethodGet, "/status")
-	if errors.Is(err, errNativeUnavailable) {
-		return &Status{Backend: "native"}, nil
-	}
-	if err == nil && status.Running {
-		status.Uptime = time.Since(state.StartedAt).Truncate(time.Second).String()
-	}
-	return status, err
-}
-
-func stopNative(ctx context.Context, state *State) error {
-	if _, err := nativeRequest(ctx, state, http.MethodPost, "/shutdown"); err != nil && !errors.Is(err, errNativeUnavailable) {
-		return err
-	}
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(50 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		_, err := os.Stat(state.ControlSocket)
-		if state.ControlSocket == "" || errors.Is(err, os.ErrNotExist) {
-			break
-		}
-		if _, controlErr := nativeRequest(ctx, state, http.MethodGet, "/status"); errors.Is(controlErr, errNativeUnavailable) {
-			os.Remove(state.ControlSocket)
-			os.Remove(filepath.Dir(state.ControlSocket))
-			break
-		} else if controlErr != nil {
-			return controlErr
-		}
-		if err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.C:
-			return errors.New("native collector did not finish shutdown; state retained")
-		case <-tick.C:
-		}
-	}
-	if err := removeState(); err != nil {
-		return err
-	}
-	fmt.Println("Collector stopped.")
-	return nil
 }

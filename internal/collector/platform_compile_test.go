@@ -1,0 +1,45 @@
+package collector
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
+
+func TestWindowsLifecycleBuilds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("cross-compiles Windows lifecycle code")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"native_process.go", "native_control.go", "platform_windows.go"} {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stubs := `package collector
+import("context";"time")
+type State struct {Backend string;PID int;ControlSocket,ControlToken string;StartedAt time.Time;ConfigPath,ConfigSHA256,DataPath string}
+type Status struct {Backend string;Running,Healthy bool;Uptime string}
+type nativeShutdownResult struct {Error string}
+func stateFilePath()(string,error){return "",nil}
+func readState()(*State,error){return nil,nil}
+func writeState(*State)error{return nil}
+func removeState()error{return nil}
+func Start(context.Context,string,string)error{return nil}
+func Stop(context.Context)error{return nil}
+func isContainerRunning()bool{return false}
+`
+	if err := os.WriteFile(filepath.Join(dir, "docker_stubs.go"), []byte(stubs), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "build", "-o", filepath.Join(dir, "windows.a"), filepath.Join(dir, "native_process.go"), filepath.Join(dir, "native_control.go"), filepath.Join(dir, "platform_windows.go"), filepath.Join(dir, "docker_stubs.go"))
+	cmd.Env = append(os.Environ(), "GOOS=windows", "GOARCH=amd64", "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Windows lifecycle compilation: %v\n%s", err, out)
+	}
+}

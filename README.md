@@ -188,6 +188,11 @@ during shutdown. Each pass releases DuckDB so separate CLI commands can query
 the database. An ingestion error goes to the Collector log and the next pass
 retries. Collection continues after ingestion errors.
 
+During shutdown, `stop` waits for exporter flush and final indexing. It retries
+temporary database locks for up to five seconds. If final indexing still fails,
+the Collector stops and `stop` exits with an error. Raw JSONL remains available.
+Run `lotel ingest` after the database becomes available to index those records.
+
 Add this optional section to `./lotel-collector.yaml` to change automatic
 ingestion in native mode:
 

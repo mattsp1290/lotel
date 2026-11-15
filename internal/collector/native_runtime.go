@@ -13,7 +13,6 @@ import (
 
 	"github.com/mattsp1290/lotel/internal/config"
 	"github.com/mattsp1290/lotel/internal/ingestion"
-	"github.com/mattsp1290/lotel/internal/storage"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/connector/spanmetricsconnector"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension"
@@ -98,6 +97,8 @@ func RunNative(ctx context.Context, configPath, dataPath, socket, token string) 
 		listener.Close()
 		return err
 	}
+	shutdownDone := make(chan struct{})
+	var result nativeShutdownResult
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+token {
@@ -120,8 +121,13 @@ func RunNative(ctx context.Context, configPath, dataPath, socket, token string) 
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		w.WriteHeader(http.StatusAccepted)
 		cancel()
+		select {
+		case <-shutdownDone:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(result)
+		case <-r.Context().Done():
+		}
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 2 * time.Second}
 	controlErrors := make(chan error, 1)
@@ -150,14 +156,15 @@ func RunNative(ctx context.Context, configPath, dataPath, socket, token string) 
 	stopIngestion()
 	<-ingestDone
 	if cfg.Ingestion.Enabled {
-		db, openErr := storage.OpenDB(filepath.Join(dataPath, "lotel.db"))
-		if openErr == nil {
-			_, openErr = storage.IngestAll(db, dataPath)
-			db.Close()
-		}
-		if openErr != nil {
-			fmt.Fprintln(os.Stderr, "lotel: final ingestion:", openErr)
-		}
+		finalCtx, cancelFinal := context.WithTimeout(context.Background(), 5*time.Second)
+		err = errors.Join(err, ingestFinal(finalCtx, dataPath))
+		cancelFinal()
 	}
-	return err
+	if err != nil {
+		result.Error = err.Error()
+	}
+	close(shutdownDone)
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	return errors.Join(err, server.Shutdown(shutdownCtx))
 }

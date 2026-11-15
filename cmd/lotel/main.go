@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -30,16 +32,18 @@ func main() {
 		Use:   "start",
 		Short: "Start the OTel Collector",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
 			configPath, dataPath, err := config.ResolvePaths()
 			if err != nil {
 				return err
 			}
-			if err := collector.StartBackend(cmd.Context(), configPath, dataPath, backend); err != nil {
+			if err := collector.StartBackend(ctx, configPath, dataPath, backend); err != nil {
 				return err
 			}
 			if waitHealthy {
 				fmt.Print("Waiting for collector to become healthy...")
-				if err := collector.WaitHealthy(cmd.Context(), 30*time.Second); err != nil {
+				if err := collector.WaitHealthy(ctx, 30*time.Second); err != nil {
 					fmt.Println(" FAILED")
 					return fmt.Errorf("collector did not become healthy: %w", err)
 				}
@@ -377,7 +381,7 @@ func openDB() (*sql.DB, error) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		db, err = storage.OpenDB(filepath.Join(dataPath, "lotel.db"))
-		if err == nil || !strings.Contains(err.Error(), "Could not set lock") || time.Now().After(deadline) {
+		if err == nil || !storage.IsDatabaseLocked(err) || time.Now().After(deadline) {
 			break
 		}
 		time.Sleep(25 * time.Millisecond)

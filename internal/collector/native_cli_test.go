@@ -35,6 +35,9 @@ func TestNativeCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if metrics, err := net.Listen("tcp", "127.0.0.1:8888"); err == nil {
+		t.Cleanup(func() { metrics.Close() })
+	}
 	home, cwd := t.TempDir(), t.TempDir()
 	ports := make([]string, 3)
 	listeners := make([]net.Listener, 3)
@@ -50,6 +53,7 @@ func TestNativeCLI(t *testing.T) {
 	text = strings.ReplaceAll(text, "0.0.0.0:13133", ports[2])
 	text = strings.ReplaceAll(text, "timeout: 1s", "timeout: 100ms")
 	text = strings.ReplaceAll(text, "metrics_flush_interval: 5s", "metrics_flush_interval: 200ms")
+	text = strings.Replace(text, "  telemetry:\n", "  telemetry:\n    metrics:\n      level: none\n", 1)
 	text += "\ningestion:\n  enabled: true\n  interval: 150ms\n"
 	configPath := filepath.Join(cwd, "lotel-collector.yaml")
 	if err := os.WriteFile(configPath, []byte(text), 0o600); err != nil {
