@@ -52,7 +52,7 @@ func TestMetricDeltaTotalCLI(t *testing.T) {
 		t.Fatalf("query failed: %q %q %v", out, stderr, err)
 	}
 	var got storage.MetricDeltaTotal
-	if err := json.Unmarshal([]byte(out), &got); err != nil || got.Total != "18014398509481993" || got.PointCount != 2 {
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got.Total != "18014398509481993" || got.RatePerSecond != "9007199254740996500000000" || got.PointCount != 2 {
 		t.Fatalf("unexpected result: %q %v", out, err)
 	}
 	out, stderr, err = run("1699999999999999999")

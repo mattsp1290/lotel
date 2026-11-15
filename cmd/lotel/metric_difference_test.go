@@ -88,7 +88,7 @@ func TestMetricDifferenceWaitsForDatabaseLock(t *testing.T) {
 		t.Fatalf("command did not finish after lock release: %v, %s", err, stderr.String())
 	}
 	var result storage.MetricDifference
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result.Difference != "7" {
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result.Difference != "7" || result.RatePerSecond != "7000000000" {
 		t.Fatalf("unexpected result after lock release: %s (%v)", stdout.String(), err)
 	}
 }
@@ -165,7 +165,7 @@ func TestMetricDifferenceCLI(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Difference != "7" || result.ElapsedNano != "1" || len(result.Assumptions) != 2 {
+	if result.Difference != "7" || result.RatePerSecond != "7000000000" || result.ElapsedNano != "1" || len(result.Assumptions) != 2 {
 		t.Fatalf("unexpected result: %s", out)
 	}
 }
@@ -307,7 +307,7 @@ func TestMetricDifferenceCLISeparatesDisjointAndAmbiguousResources(t *testing.T)
 			out, stderr, err := invokeMetricDifference(t, home, "--selector", selector, "--from-ns", "1700000000000000001", "--to-ns", "1700000000000000002")
 			if tc.wantSuccess {
 				var result storage.MetricDifference
-				if err != nil || json.Unmarshal([]byte(out), &result) != nil || result.Difference != "7" {
+				if err != nil || json.Unmarshal([]byte(out), &result) != nil || result.Difference != "7" || result.RatePerSecond != "7000000000" {
 					t.Fatalf("disjoint resource blocked: %q %q %v", out, stderr, err)
 				}
 			} else if err == nil || out != "" || !strings.Contains(stderr, "indeterminate") {

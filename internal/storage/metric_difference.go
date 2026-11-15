@@ -14,11 +14,12 @@ import (
 )
 
 type MetricDifference struct {
-	FromUnixNano string   `json:"from_unix_nano"`
-	ToUnixNano   string   `json:"to_unix_nano"`
-	Difference   string   `json:"difference"`
-	ElapsedNano  string   `json:"elapsed_nanoseconds"`
-	Assumptions  []string `json:"assumptions"`
+	FromUnixNano  string   `json:"from_unix_nano"`
+	ToUnixNano    string   `json:"to_unix_nano"`
+	Difference    string   `json:"difference"`
+	RatePerSecond string   `json:"rate_per_second"`
+	ElapsedNano   string   `json:"elapsed_nanoseconds"`
+	Assumptions   []string `json:"assumptions"`
 }
 
 const (
@@ -38,6 +39,7 @@ type metricObservation struct {
 	value     int64
 	flags     uint32
 	integer   bool
+	histogram *metricpb.HistogramDataPoint
 }
 
 type metricIdentityRelation uint8
@@ -99,18 +101,18 @@ func metricPointRelation(attrs []*commonpb.KeyValue, id metricSelection) metricI
 
 type metricPointAttributes interface{ GetAttributes() []*commonpb.KeyValue }
 
-func visitMetricPoints(metric *metricpb.Metric, temporality metricpb.AggregationTemporality, visit func(metricPointAttributes, *metricpb.NumberDataPoint, bool) error) error {
+func visitMetricPoints(metric *metricpb.Metric, selector MetricSelector, visit func(metricPointAttributes, bool) error) error {
 	switch data := metric.Data.(type) {
 	case *metricpb.Metric_Sum:
 		if data.Sum == nil {
 			return fmt.Errorf("indeterminate: missing sum")
 		}
-		valid := data.Sum.IsMonotonic && data.Sum.AggregationTemporality == temporality
+		valid := selector.kind == metricSum && data.Sum.IsMonotonic && data.Sum.AggregationTemporality == selector.temporality
 		for _, point := range data.Sum.DataPoints {
 			if point == nil {
 				return fmt.Errorf("indeterminate: missing point")
 			}
-			if err := visit(point, point, valid); err != nil {
+			if err := visit(point, valid); err != nil {
 				return err
 			}
 		}
@@ -122,7 +124,7 @@ func visitMetricPoints(metric *metricpb.Metric, temporality metricpb.Aggregation
 			if point == nil {
 				return fmt.Errorf("indeterminate: missing point")
 			}
-			if err := visit(point, nil, false); err != nil {
+			if err := visit(point, false); err != nil {
 				return err
 			}
 		}
@@ -134,7 +136,7 @@ func visitMetricPoints(metric *metricpb.Metric, temporality metricpb.Aggregation
 			if point == nil {
 				return fmt.Errorf("indeterminate: missing point")
 			}
-			if err := visit(point, nil, false); err != nil {
+			if err := visit(point, selector.kind == metricHistogram && data.Histogram.AggregationTemporality == selector.temporality); err != nil {
 				return err
 			}
 		}
@@ -146,7 +148,7 @@ func visitMetricPoints(metric *metricpb.Metric, temporality metricpb.Aggregation
 			if point == nil {
 				return fmt.Errorf("indeterminate: missing point")
 			}
-			if err := visit(point, nil, false); err != nil {
+			if err := visit(point, false); err != nil {
 				return err
 			}
 		}
@@ -158,7 +160,7 @@ func visitMetricPoints(metric *metricpb.Metric, temporality metricpb.Aggregation
 			if point == nil {
 				return fmt.Errorf("indeterminate: missing point")
 			}
-			if err := visit(point, nil, false); err != nil {
+			if err := visit(point, false); err != nil {
 				return err
 			}
 		}
@@ -235,7 +237,7 @@ func observedMetricPoints(ctx context.Context, db *sql.DB, selector MetricSelect
 					if metric.Name != id.name || metric.Unit != id.unit {
 						continue
 					}
-					err := visitMetricPoints(metric, selector.temporality, func(attrs metricPointAttributes, point *metricpb.NumberDataPoint, validType bool) error {
+					err := visitMetricPoints(metric, selector, func(attrs metricPointAttributes, validType bool) error {
 						if err := ctx.Err(); err != nil {
 							return err
 						}
@@ -246,19 +248,27 @@ func observedMetricPoints(ctx context.Context, db *sql.DB, selector MetricSelect
 						if resourceRelation != metricIdentityMatch || scopeRelation != metricIdentityMatch || pointRelation != metricIdentityMatch {
 							return fmt.Errorf("indeterminate: possibly matching incomplete identity")
 						}
-						if !validType || point == nil {
+						if !validType {
 							return fmt.Errorf("indeterminate: conflicting metric type or temporality")
 						}
-						if point.TimeUnixNano == 0 {
+						var observation metricObservation
+						switch point := attrs.(type) {
+						case *metricpb.NumberDataPoint:
+							value, ok := point.Value.(*metricpb.NumberDataPoint_AsInt)
+							observation = metricObservation{timestamp: point.TimeUnixNano, start: point.StartTimeUnixNano, flags: point.Flags, integer: ok}
+							if ok {
+								observation.value = value.AsInt
+							}
+						case *metricpb.HistogramDataPoint:
+							observation = metricObservation{timestamp: point.TimeUnixNano, start: point.StartTimeUnixNano, flags: point.Flags, histogram: point}
+						default:
+							return fmt.Errorf("indeterminate: conflicting metric type")
+						}
+						if observation.timestamp == 0 {
 							return fmt.Errorf("indeterminate: matching point has no timestamp")
 						}
-						if point.StartTimeUnixNano > point.TimeUnixNano {
+						if observation.start > observation.timestamp {
 							return fmt.Errorf("indeterminate: point has invalid start time")
-						}
-						value, ok := point.Value.(*metricpb.NumberDataPoint_AsInt)
-						observation := metricObservation{timestamp: point.TimeUnixNano, start: point.StartTimeUnixNano, flags: point.Flags, integer: ok}
-						if ok {
-							observation.value = value.AsInt
 						}
 						points = append(points, observation)
 						return nil
@@ -282,72 +292,88 @@ func observedMetricPoints(ctx context.Context, db *sql.DB, selector MetricSelect
 
 func QueryMetricDifference(ctx context.Context, db *sql.DB, selector MetricSelector, from, to uint64) (MetricDifference, error) {
 	result := MetricDifference{}
-	if selector.temporality != metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE {
+	if selector.kind != metricSum || selector.temporality != metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE {
 		return result, fmt.Errorf("invalid cumulative metric selector")
 	}
 	points, err := observedMetricPoints(ctx, db, selector, from, to)
 	if err != nil {
 		return result, err
 	}
-	sort.Slice(points, func(i, j int) bool { return points[i].timestamp < points[j].timestamp })
-	var first, last *metricObservation
-	for i := range points {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		if points[i].timestamp == from {
-			if first != nil {
-				return result, fmt.Errorf("indeterminate: duplicate first endpoint")
-			}
-			first = &points[i]
-		}
-		if points[i].timestamp == to {
-			if last != nil {
-				return result, fmt.Errorf("indeterminate: duplicate second endpoint")
-			}
-			last = &points[i]
-		}
-	}
-	if first == nil || last == nil {
-		return result, fmt.Errorf("indeterminate: selected endpoint points are missing")
-	}
-	if !first.integer || first.flags != 0 || first.start == 0 || first.start > from || !last.integer || last.flags != 0 || last.start != first.start || last.value < first.value {
-		return result, fmt.Errorf("indeterminate: invalid endpoints or reset")
-	}
-	start := first.start
-	var previous *metricObservation
-	for i := range points {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		point := &points[i]
-		if point.start > point.timestamp {
-			return result, fmt.Errorf("indeterminate: point has invalid start time")
-		}
-		if point.start == 0 {
-			if point.timestamp > from {
-				return result, fmt.Errorf("indeterminate: point has unknown start")
-			}
-			continue
-		}
-		if point.start != start {
-			if point.timestamp > from && point.start < to {
-				return result, fmt.Errorf("indeterminate: overlapping cumulative epoch")
-			}
-			continue
-		}
-		if !point.integer || point.flags != 0 {
-			return result, fmt.Errorf("indeterminate: conflicting cumulative point")
-		}
-		if previous != nil && (point.timestamp == previous.timestamp || point.value < previous.value) {
-			return result, fmt.Errorf("indeterminate: duplicate or decreasing cumulative point")
-		}
-		previous = point
-	}
-	if err := ctx.Err(); err != nil {
+	epoch, err := observedCumulativeEpoch(ctx, points, from, to)
+	if err != nil {
 		return result, err
 	}
-	difference := new(big.Int).Sub(big.NewInt(last.value), big.NewInt(first.value))
-	result = MetricDifference{FromUnixNano: fmt.Sprint(from), ToUnixNano: fmt.Sprint(to), Difference: difference.String(), ElapsedNano: fmt.Sprint(to - from), Assumptions: []string{"Observed retained points only; ingestion or retention may be incomplete.", "The selected stream is assumed to have a single writer."}}
-	return result, nil
+	for i, point := range epoch.points {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		if !point.integer || (i > 0 && point.value < epoch.points[i-1].value) {
+			return result, fmt.Errorf("indeterminate: invalid or decreasing cumulative integer")
+		}
+	}
+	difference := new(big.Int).Sub(big.NewInt(epoch.points[epoch.last].value), big.NewInt(epoch.points[epoch.first].value))
+	return MetricDifference{
+		FromUnixNano: fmt.Sprint(from), ToUnixNano: fmt.Sprint(to), Difference: difference.String(),
+		ElapsedNano: fmt.Sprint(to - from), RatePerSecond: observedRate(difference, to-from), Assumptions: metricAssumptions(),
+	}, nil
+}
+
+func observedRate(increase *big.Int, elapsedNs uint64) string {
+	perSecond := new(big.Int).Mul(increase, big.NewInt(1_000_000_000))
+	return new(big.Rat).SetFrac(perSecond, new(big.Int).SetUint64(elapsedNs)).RatString()
+}
+
+func metricAssumptions() []string {
+	return []string{"Observed retained points only; ingestion or retention may be incomplete.", "The selected stream is assumed to have a single writer."}
+}
+
+type cumulativeEpoch struct {
+	points      []metricObservation
+	first, last int
+}
+
+func observedCumulativeEpoch(ctx context.Context, points []metricObservation, from, to uint64) (cumulativeEpoch, error) {
+	sort.Slice(points, func(i, j int) bool { return points[i].timestamp < points[j].timestamp })
+	var start uint64
+	for _, point := range points {
+		if point.timestamp == from {
+			start = point.start
+			break
+		}
+	}
+	if start == 0 {
+		return cumulativeEpoch{}, fmt.Errorf("indeterminate: first endpoint or its start time is missing")
+	}
+	epoch := cumulativeEpoch{first: -1, last: -1}
+	for i, point := range points {
+		if err := ctx.Err(); err != nil {
+			return cumulativeEpoch{}, err
+		}
+		if i > 0 && point.timestamp == points[i-1].timestamp && (point.timestamp == from || point.timestamp == to) {
+			return cumulativeEpoch{}, fmt.Errorf("indeterminate: duplicate endpoint")
+		}
+		if point.start != start {
+			if point.start == 0 && point.timestamp > from {
+				return cumulativeEpoch{}, fmt.Errorf("indeterminate: point has unknown start")
+			}
+			if point.timestamp > from && point.start < to {
+				return cumulativeEpoch{}, fmt.Errorf("indeterminate: overlapping cumulative epoch")
+			}
+			continue
+		}
+		if point.flags != 0 || (len(epoch.points) > 0 && point.timestamp == epoch.points[len(epoch.points)-1].timestamp) {
+			return cumulativeEpoch{}, fmt.Errorf("indeterminate: flagged or duplicate cumulative point")
+		}
+		if point.timestamp == from {
+			epoch.first = len(epoch.points)
+		}
+		if point.timestamp == to {
+			epoch.last = len(epoch.points)
+		}
+		epoch.points = append(epoch.points, point)
+	}
+	if epoch.first < 0 || epoch.last < 0 {
+		return cumulativeEpoch{}, fmt.Errorf("indeterminate: selected endpoints are missing or reset")
+	}
+	return epoch, nil
 }

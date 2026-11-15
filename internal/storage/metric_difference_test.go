@@ -181,7 +181,7 @@ func TestMetricDifferenceCanExceedSignedIntegerRange(t *testing.T) {
 	last := differenceTestPoint("1700000000000000002", "1600000000000000000", "9223372036854775807")
 	db := ingestMetricsForDifference(t, metricEnvelope("A", first+","+last))
 	got, err := queryMetricDifferenceTest(db, []byte(metricEnvelope("A", first)), 1700000000000000001, 1700000000000000002)
-	if err != nil || got.Difference != "18446744073709551615" {
+	if err != nil || got.Difference != "18446744073709551615" || got.RatePerSecond != "18446744073709551615000000000" {
 		t.Fatalf("overflow: %+v %v", got, err)
 	}
 }
@@ -715,5 +715,27 @@ func TestMetricSelectorRejectsMalformedExemplarAndCancellation(t *testing.T) {
 	}
 	if _, err := QueryMetricDifference(ctx, db, prepared, 10, 30); !errors.Is(err, context.Canceled) {
 		t.Fatalf("query cancellation: %v", err)
+	}
+}
+
+func TestMetricDifferenceObservedRate(t *testing.T) {
+	first := differenceTestPoint("1", "1", "9")
+	second := differenceTestPoint("4", "1", "10")
+	last := differenceTestPoint("18446744073709551615", "1", "10")
+	envelope := metricEnvelope("A", first+","+second+","+last)
+	db := ingestMetricsForDifference(t, envelope)
+	selector := []byte(metricEnvelope("A", first))
+	for _, tc := range []struct {
+		from, to uint64
+		want     string
+	}{
+		{1, 4, "1000000000/3"},
+		{4, ^uint64(0), "0"},
+		{1, ^uint64(0), "500000000/9223372036854775807"},
+	} {
+		got, err := queryMetricDifferenceTest(db, selector, tc.from, tc.to)
+		if err != nil || got.RatePerSecond != tc.want {
+			t.Fatalf("rate for (%d, %d]: %+v %v", tc.from, tc.to, got, err)
+		}
 	}
 }

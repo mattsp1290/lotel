@@ -88,7 +88,7 @@ func validateMetricEnvelope(ctx context.Context, data *metricpb.MetricsData) err
 				if metric == nil || metric.Name == "" || metric.Data == nil {
 					return fmt.Errorf("indeterminate: malformed metric")
 				}
-				if err := visitMetricPoints(metric, metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE, func(metricPointAttributes, *metricpb.NumberDataPoint, bool) error { return ctx.Err() }); err != nil {
+				if err := visitMetricPoints(metric, MetricSelector{}, func(metricPointAttributes, bool) error { return ctx.Err() }); err != nil {
 					return err
 				}
 			}
