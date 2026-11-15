@@ -23,22 +23,20 @@ func discoveryCommand(name string) *cobra.Command {
 			if err := discoveryOpts.Validate(); err != nil {
 				return err
 			}
-			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+			return withDatabaseJSON(func(cmd *cobra.Command, args []string, db *sql.DB) (any, error) {
 				if name == "services" {
 					results, err := storage.QueryServices(db, discoveryOpts)
 					if err != nil {
-						return err
+						return nil, err
 					}
-					printJSON(results)
-					return nil
+					return results, nil
 				}
 				results, err := storage.QueryOperations(db, discoveryOpts)
 				if err != nil {
-					return err
+					return nil, err
 				}
-				printJSON(results)
-				return nil
-			})(cmd, args)
+				return results, nil
+			}, true)(cmd, args)
 		},
 	}
 	cmd.Flags().StringVar(&service, "service", "", "filter by service.name")

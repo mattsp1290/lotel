@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -24,13 +23,13 @@ func spanStatsCommand() *cobra.Command {
 			if !validBoundedWindow(start, end, now) || limit < 0 {
 				return fmt.Errorf("invalid span statistics window or limit")
 			}
-			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+			return withDatabaseJSON(func(cmd *cobra.Command, args []string, db *sql.DB) (any, error) {
 				results, err := storage.QuerySpanStats(db, storage.SpanStatsOptions{Service: service, Since: start, Until: end, Limit: limit})
 				if err != nil {
-					return err
+					return nil, err
 				}
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(results)
-			})(cmd, args)
+				return results, nil
+			}, false)(cmd, args)
 		},
 	}
 	cmd.Flags().StringVar(&service, "service", "", "filter by service.name")

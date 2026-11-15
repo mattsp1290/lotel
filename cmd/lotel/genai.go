@@ -15,34 +15,33 @@ func genAICommand() *cobra.Command {
 		var service, since, until, model, provider, operation, conversation, traceID, groupBy string
 		var limit int
 		var content, errorsOnly bool
-		cmd := &cobra.Command{Use: mode, Short: "Query GenAI " + mode + " (JSON)", RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+		cmd := &cobra.Command{Use: mode, Short: "Query GenAI " + mode + " (JSON)", RunE: withDatabaseJSON(func(cmd *cobra.Command, args []string, db *sql.DB) (any, error) {
 			common, err := parseQueryOpts(service, since, until, limit)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			common.TraceID = traceID
 			opts := storage.GenAIOptions{QueryOptions: common, Model: model, Provider: provider, Operation: operation, ConversationID: conversation, ErrorsOnly: errorsOnly, Content: content, GroupBy: strings.Split(groupBy, ",")}
 			if mode == "calls" {
 				rows, err := storage.QueryGenAICalls(db, opts)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				if rows == nil {
 					rows = []storage.GenAICall{}
 				}
-				printJSON(rows)
+				return rows, nil
 			} else {
 				rows, err := storage.QueryGenAIUsage(db, opts)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				if rows == nil {
 					rows = []storage.GenAIUsageRow{}
 				}
-				printJSON(rows)
+				return rows, nil
 			}
-			return nil
-		})}
+		}, true)}
 		f := cmd.Flags()
 		f.StringVar(&service, "service", "", "filter by service.name")
 		f.StringVar(&since, "since", "", "start time (RFC3339 or relative duration)")

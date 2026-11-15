@@ -452,6 +452,9 @@ All query commands output JSON to stdout. Exit codes:
 - `1`: error or unhealthy status
 
 This makes lotel suitable for scripted and agent-driven workflows.
+`ingest` and `prune` finish database changes before writing their reports. If
+report output fails, those changes can still have completed. Check the database
+state before retrying.
 
 ## Architecture
 

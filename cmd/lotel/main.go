@@ -115,31 +115,7 @@ func main() {
 		},
 	}
 
-	// --- ingest ---
-	var fullIngest bool
-	ingestCmd := &cobra.Command{
-		Use:   "ingest",
-		Short: "Ingest JSONL telemetry files into the query database",
-		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
-			dataPath, err := config.DataPath()
-			if err != nil {
-				return err
-			}
-			var report *storage.IngestReport
-			if fullIngest {
-				report, err = storage.ReingestAll(db, dataPath)
-			} else {
-				report, err = storage.IngestAll(db, dataPath)
-			}
-			if err != nil {
-				return err
-			}
-			printJSON(report)
-			return nil
-		}),
-	}
-
-	ingestCmd.Flags().BoolVar(&fullIngest, "full", false, "rebuild the query index from retained JSONL; previously pruned records can return")
+	ingestCmd := ingestCommand()
 
 	// --- query traces ---
 	queryCmd := &cobra.Command{
@@ -167,38 +143,36 @@ func main() {
 				}
 				traceOpts.MinDuration = &duration
 			}
-			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+			return withDatabaseJSON(func(cmd *cobra.Command, args []string, db *sql.DB) (any, error) {
 				results, err := storage.QueryTraces(db, traceOpts)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				if results == nil {
 					results = []storage.TraceResult{}
 				}
-				printJSON(results)
-				return nil
-			})(cmd, args)
+				return results, nil
+			}, true)(cmd, args)
 		},
 	}
 
 	queryMetricsCmd := &cobra.Command{
 		Use:   "metrics",
 		Short: "Query metrics (JSON output)",
-		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+		RunE: withDatabaseJSON(func(cmd *cobra.Command, args []string, db *sql.DB) (any, error) {
 			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			results, err := storage.QueryMetrics(db, opts)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if results == nil {
 				results = []storage.MetricResult{}
 			}
-			printJSON(results)
-			return nil
-		}),
+			return results, nil
+		}, true),
 	}
 
 	queryLogsCmd := &cobra.Command{
@@ -214,17 +188,16 @@ func main() {
 			if err != nil {
 				return err
 			}
-			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+			return withDatabaseJSON(func(cmd *cobra.Command, args []string, db *sql.DB) (any, error) {
 				results, err := storage.QueryLogs(db, logOpts)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				if results == nil {
 					results = []storage.LogResult{}
 				}
-				printJSON(results)
-				return nil
-			})(cmd, args)
+				return results, nil
+			}, true)(cmd, args)
 		},
 	}
 
@@ -233,21 +206,20 @@ func main() {
 	queryAggCmd := &cobra.Command{
 		Use:   "aggregate",
 		Short: "Compute avg/min/max; for cumulative histograms, read the latest query metrics point",
-		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+		RunE: withDatabaseJSON(func(cmd *cobra.Command, args []string, db *sql.DB) (any, error) {
 			if metricName == "" {
-				return fmt.Errorf("--metric is required")
+				return nil, fmt.Errorf("--metric is required")
 			}
 			opts, err := parseQueryOpts(service, since, until, 0)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			result, err := storage.AggregateMetrics(db, opts, metricName)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			printJSON(result)
-			return nil
-		}),
+			return result, nil
+		}, true),
 	}
 	queryAggCmd.Flags().StringVar(&metricName, "metric", "", "metric name to aggregate (required)")
 
@@ -275,52 +247,7 @@ func main() {
 	}
 	queryCmd.AddCommand(recentCommand(), discoveryCommand("services"), discoveryCommand("operations"), dependenciesCommand(), spanStatsCommand(), logStatsCommand(), traceCommand(), queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
 
-	// --- prune ---
-	var olderThan string
-	var pruneService string
-	var dryRun bool
-	var pruneAll bool
-	pruneCmd := &cobra.Command{
-		Use:   "prune",
-		Short: "Delete telemetry data older than a threshold",
-		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
-			if pruneAll && olderThan != "" {
-				return fmt.Errorf("--all and --older-than are mutually exclusive")
-			}
-			if !pruneAll && olderThan == "" {
-				return fmt.Errorf("--older-than or --all is required (e.g., '7d', '24h')")
-			}
-
-			var cutoff time.Time
-			if pruneAll {
-				cutoff = time.Now()
-			} else {
-				dur, err := parseDuration(olderThan)
-				if err != nil {
-					return fmt.Errorf("invalid --older-than: %w", err)
-				}
-				cutoff = time.Now().Add(-dur)
-			}
-
-			prune := storage.Prune
-			if pruneAll {
-				prune = storage.PruneAll
-			}
-			reports, err := prune(db, cutoff, pruneService, dryRun)
-			if err != nil {
-				return err
-			}
-			if dryRun {
-				fmt.Fprintln(os.Stderr, "Dry run — no data was deleted.")
-			}
-			printJSON(reports)
-			return nil
-		}),
-	}
-	pruneCmd.Flags().StringVar(&olderThan, "older-than", "", "age threshold (e.g., '7d', '24h', '1h')")
-	pruneCmd.Flags().StringVar(&pruneService, "service", "", "limit pruning to a specific service")
-	pruneCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be pruned without deleting")
-	pruneCmd.Flags().BoolVar(&pruneAll, "all", false, "delete all telemetry data")
+	pruneCmd := pruneCommand()
 
 	var catalog commandCatalog
 	rootCmd.AddCommand(runtimeRunCommand())
@@ -394,13 +321,41 @@ func withDatabase(run func(*cobra.Command, []string, *sql.DB) error) func(*cobra
 		}
 		ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 		defer cancel()
-		return storage.WithDB(ctx, filepath.Join(dataPath, "lotel.db"), func(db *sql.DB) error {
+		var rebuilt bool
+		err = storage.WithDB(ctx, filepath.Join(dataPath, "lotel.db"), func(db *sql.DB) error {
 			if storage.SchemaRebuilt {
-				fmt.Fprintln(os.Stderr, "lotel: database index rebuilt; run 'lotel ingest' to reload raw telemetry")
+				rebuilt = true
 				storage.SchemaRebuilt = false
 			}
 			return run(cmd, args, db)
 		})
+		if rebuilt {
+			fmt.Fprintln(cmd.ErrOrStderr(), "lotel: database index rebuilt; run 'lotel ingest' to reload raw telemetry")
+		}
+		return err
+	}
+}
+
+func writeJSON(cmd *cobra.Command, value any, indent bool) error {
+	encoder := json.NewEncoder(cmd.OutOrStdout())
+	if indent {
+		encoder.SetIndent("", "  ")
+	}
+	return encoder.Encode(value)
+}
+
+func withDatabaseJSON(run func(*cobra.Command, []string, *sql.DB) (any, error), indent bool) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		var result any
+		err := withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+			var err error
+			result, err = run(cmd, args, db)
+			return err
+		})(cmd, args)
+		if err != nil {
+			return err
+		}
+		return writeJSON(cmd, result, indent)
 	}
 }
 
