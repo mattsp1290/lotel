@@ -202,6 +202,8 @@ lotel --version
 | `lotel stop` | Stop the collector |
 | `lotel status` | Show collector status (JSON) |
 | `lotel health` | Check collector health (exit 0/1) |
+| `lotel diagnose runtime` | Inspect the recorded runtime and ingestion status without changing files |
+| `lotel diagnose signals` | Inspect indexed signal evidence without changing files |
 | `lotel ingest` | Incrementally ingest new JSONL telemetry (JSON report) |
 | `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
 | `lotel assert signal` | Fail if a service has no indexed signal in a time window |
@@ -290,6 +292,30 @@ The database materializes the bounded payload scan (up to 64 MiB of payload plus
 query and decoding overhead); metadata and payload each require a table scan.
 The metadata limit bounds matching rows, with database vector read-ahead; it does
 not bound scanning unrelated rows.
+`lotel diagnose runtime` reads the recorded runtime state and requests its
+status without creating files or opening the database. A missing state file
+means no runtime is recorded. The state must be a regular file, not a symbolic
+link. A missing state file does not establish whether a Collector is
+running. An unavailable runtime leaves its running and health values unknown.
+`combined_healthy` reflects both Collector and automatic-ingestion health.
+Ingestion errors are reported as `has_error`; the report omits the error text,
+control socket, and token. It does not inspect an unmanaged Docker container
+or check whether any signal has reached the index.
+
+`lotel diagnose signals --service my-app --since 15m` reports the latest
+indexed trace, metric, and log timestamp in the inclusive window. It uses
+projected event timestamps at microsecond precision and does not inspect
+profiles. An absent match is not proof that the application or collection
+failed. Unavailable data is reported as unknown, not as an absent match.
+
+The command opens an existing database in read-only mode under its existing
+lock. It does not create the database or lock, or migrate the schema. It
+rejects database paths containing `?`, `#`, or `%`, and it bounds the time
+spent in a separate worker. If a database WAL exists, the report is unavailable
+until normal database recovery removes it. The command does not modify the WAL.
+It assumes the private data directory and its
+entries are not concurrently replaced. DuckDB opens the database by pathname,
+so identity checks cannot rule out a replacement at the instant of open.
 
 ## Query options
 

@@ -15,7 +15,7 @@ import (
 
 var errRuntimeUnavailable = errors.New("collector runtime control is unavailable")
 
-func runtimeControlRequest(ctx context.Context, state *State, method, path string, timeout time.Duration) (*http.Response, error) {
+func runtimeControlRequest(ctx context.Context, state *State, method, path string, timeout time.Duration, checkRedirect func(*http.Request, []*http.Request) error) (*http.Response, error) {
 	if state.ControlSocket == "" || state.ControlToken == "" {
 		return nil, errRuntimeUnavailable
 	}
@@ -25,7 +25,7 @@ func runtimeControlRequest(ctx context.Context, state *State, method, path strin
 			return (&net.Dialer{}).DialContext(ctx, "unix", state.ControlSocket)
 		},
 	}
-	client := &http.Client{Transport: transport, Timeout: timeout}
+	client := &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: checkRedirect}
 	req, err := http.NewRequestWithContext(ctx, method, "http://lotel"+path, nil)
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func runtimeControlRequest(ctx context.Context, state *State, method, path strin
 }
 
 func requestRuntimeStatus(ctx context.Context, state *State) (*Status, error) {
-	response, err := runtimeControlRequest(ctx, state, http.MethodGet, "/status", 2*time.Second)
+	response, err := runtimeControlRequest(ctx, state, http.MethodGet, "/status", 2*time.Second, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func requestRuntimeStatus(ctx context.Context, state *State) (*Status, error) {
 
 func requestRuntimeShutdown(ctx context.Context, state *State) (runtimeShutdownResult, error) {
 	var result runtimeShutdownResult
-	response, err := runtimeControlRequest(ctx, state, http.MethodPost, "/shutdown", 45*time.Second)
+	response, err := runtimeControlRequest(ctx, state, http.MethodPost, "/shutdown", 45*time.Second, nil)
 	if err != nil {
 		return result, err
 	}
