@@ -49,6 +49,9 @@ func resolveBoundedWindow(since, until string, untilSet bool, now time.Time) (ti
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("invalid --since: %w", err)
 	}
+	if start.Year() < 0 || start.Year() > 9999 {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid --since: UTC year must be between 0 and 9999")
+	}
 	end := now
 	if untilSet {
 		end, err = parseWindowTimestamp(until)
@@ -56,6 +59,9 @@ func resolveBoundedWindow(since, until string, untilSet bool, now time.Time) (ti
 			return time.Time{}, time.Time{}, fmt.Errorf("invalid --until: %w", err)
 		}
 		end = end.UTC()
+	}
+	if end.Year() < 0 || end.Year() > 9999 {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid --until: UTC year must be between 0 and 9999")
 	}
 	return start, end, nil
 }
