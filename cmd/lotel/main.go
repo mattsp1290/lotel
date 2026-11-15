@@ -32,8 +32,12 @@ func main() {
 		Use:   "start",
 		Short: "Start the OTel Collector",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-			defer cancel()
+			ctx := cmd.Context()
+			if backend == "native" {
+				var cancel context.CancelFunc
+				ctx, cancel = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+				defer cancel()
+			}
 			configPath, dataPath, err := config.ResolvePaths()
 			if err != nil {
 				return err
