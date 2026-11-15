@@ -32,14 +32,14 @@ type metricSelection struct {
 	attributes     []byte
 }
 
-func canonicalAttrs(attrs []*commonpb.KeyValue) error {
+func canonicalAttrs(attrs []*commonpb.KeyValue, rejectNonfinite bool) error {
 	seen := make(map[string]bool, len(attrs))
 	for _, kv := range attrs {
 		if kv == nil || kv.Key == "" || kv.KeyStrindex != 0 || kv.Value == nil || seen[kv.Key] {
 			return fmt.Errorf("invalid or duplicate attribute key")
 		}
 		seen[kv.Key] = true
-		if err := canonicalValue(kv.Value); err != nil {
+		if err := canonicalValue(kv.Value, rejectNonfinite); err != nil {
 			return err
 		}
 	}
@@ -47,7 +47,7 @@ func canonicalAttrs(attrs []*commonpb.KeyValue) error {
 	return nil
 }
 
-func canonicalValue(v *commonpb.AnyValue) error {
+func canonicalValue(v *commonpb.AnyValue, rejectNonfinite bool) error {
 	if v == nil {
 		return fmt.Errorf("missing attribute value")
 	}
@@ -55,7 +55,7 @@ func canonicalValue(v *commonpb.AnyValue) error {
 	case *commonpb.AnyValue_StringValue, *commonpb.AnyValue_BoolValue, *commonpb.AnyValue_IntValue, *commonpb.AnyValue_BytesValue:
 		return nil
 	case *commonpb.AnyValue_DoubleValue:
-		if math.IsNaN(x.DoubleValue) || math.IsInf(x.DoubleValue, 0) {
+		if rejectNonfinite && (math.IsNaN(x.DoubleValue) || math.IsInf(x.DoubleValue, 0)) {
 			return fmt.Errorf("non-finite attribute value")
 		}
 		if x.DoubleValue == 0 {
@@ -67,7 +67,7 @@ func canonicalValue(v *commonpb.AnyValue) error {
 			return fmt.Errorf("invalid array attribute")
 		}
 		for _, item := range x.ArrayValue.Values {
-			if err := canonicalValue(item); err != nil {
+			if err := canonicalValue(item, rejectNonfinite); err != nil {
 				return err
 			}
 		}
@@ -76,7 +76,7 @@ func canonicalValue(v *commonpb.AnyValue) error {
 		if x.KvlistValue == nil {
 			return fmt.Errorf("invalid map attribute")
 		}
-		return canonicalAttrs(x.KvlistValue.Values)
+		return canonicalAttrs(x.KvlistValue.Values, rejectNonfinite)
 	default:
 		return fmt.Errorf("unsupported attribute value")
 	}
@@ -86,7 +86,7 @@ func encodedIdentity(m proto.Message) ([]byte, error) {
 	return proto.MarshalOptions{Deterministic: true}.Marshal(m)
 }
 
-func canonicalResource(r *resourcepb.Resource) ([]byte, error) {
+func canonicalResource(r *resourcepb.Resource, rejectNonfinite bool) ([]byte, error) {
 	if r == nil {
 		r = &resourcepb.Resource{}
 	} else {
@@ -95,12 +95,12 @@ func canonicalResource(r *resourcepb.Resource) ([]byte, error) {
 	if r.DroppedAttributesCount != 0 || len(r.EntityRefs) != 0 {
 		return nil, fmt.Errorf("resource has dropped attributes or unsupported entity references")
 	}
-	if err := canonicalAttrs(r.Attributes); err != nil {
+	if err := canonicalAttrs(r.Attributes, rejectNonfinite); err != nil {
 		return nil, err
 	}
 	return encodedIdentity(r)
 }
-func canonicalScope(s *commonpb.InstrumentationScope) ([]byte, error) {
+func canonicalScope(s *commonpb.InstrumentationScope, rejectNonfinite bool) ([]byte, error) {
 	if s == nil {
 		s = &commonpb.InstrumentationScope{}
 	} else {
@@ -109,15 +109,15 @@ func canonicalScope(s *commonpb.InstrumentationScope) ([]byte, error) {
 	if s.DroppedAttributesCount != 0 {
 		return nil, fmt.Errorf("scope has dropped attributes")
 	}
-	if err := canonicalAttrs(s.Attributes); err != nil {
+	if err := canonicalAttrs(s.Attributes, rejectNonfinite); err != nil {
 		return nil, err
 	}
 	return encodedIdentity(s)
 }
-func canonicalPoint(attrs []*commonpb.KeyValue) ([]byte, error) {
+func canonicalPoint(attrs []*commonpb.KeyValue, rejectNonfinite bool) ([]byte, error) {
 	p := &metricpb.NumberDataPoint{Attributes: attrs}
 	p = proto.Clone(p).(*metricpb.NumberDataPoint)
-	if err := canonicalAttrs(p.Attributes); err != nil {
+	if err := canonicalAttrs(p.Attributes, rejectNonfinite); err != nil {
 		return nil, err
 	}
 	return encodedIdentity(p)
@@ -151,13 +151,13 @@ func parseMetricSelection(data []byte) (metricSelection, error) {
 	if metric.Name == "" || sum == nil || !sum.IsMonotonic || sum.AggregationTemporality != metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE || len(sum.DataPoints) != 1 || sum.DataPoints[0] == nil {
 		return id, fmt.Errorf("selector must contain one cumulative monotonic sum point")
 	}
-	if id.resource, err = canonicalResource(r.Resource); err != nil {
+	if id.resource, err = canonicalResource(r.Resource, true); err != nil {
 		return id, err
 	}
-	if id.scope, err = canonicalScope(s.Scope); err != nil {
+	if id.scope, err = canonicalScope(s.Scope, true); err != nil {
 		return id, err
 	}
-	if id.attributes, err = canonicalPoint(sum.DataPoints[0].Attributes); err != nil {
+	if id.attributes, err = canonicalPoint(sum.DataPoints[0].Attributes, true); err != nil {
 		return id, err
 	}
 	id.resourceSchema, id.scopeSchema, id.name, id.unit = r.SchemaUrl, s.SchemaUrl, metric.Name, metric.Unit
@@ -199,7 +199,7 @@ func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]*metr
 			if resource.SchemaUrl != id.resourceSchema {
 				continue
 			}
-			resourceKey, err := canonicalResource(resource.Resource)
+			resourceKey, err := canonicalResource(resource.Resource, false)
 			if err != nil {
 				return nil, fmt.Errorf("indeterminate: %w", err)
 			}
@@ -213,7 +213,7 @@ func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]*metr
 				if scope.SchemaUrl != id.scopeSchema {
 					continue
 				}
-				scopeKey, err := canonicalScope(scope.Scope)
+				scopeKey, err := canonicalScope(scope.Scope, false)
 				if err != nil {
 					return nil, fmt.Errorf("indeterminate: %w", err)
 				}
@@ -235,7 +235,7 @@ func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]*metr
 						if point == nil {
 							return nil, fmt.Errorf("indeterminate: missing data point")
 						}
-						key, err := canonicalPoint(point.Attributes)
+						key, err := canonicalPoint(point.Attributes, false)
 						if err != nil {
 							return nil, fmt.Errorf("indeterminate: %w", err)
 						}

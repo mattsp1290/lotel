@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mattsp1290/lotel/internal/storage"
 )
@@ -24,6 +27,70 @@ func invokeMetricDifference(t *testing.T, home string, args ...string) (string, 
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	return stdout.String(), stderr.String(), err
+}
+
+func TestMetricDifferenceWaitsForDatabaseLock(t *testing.T) {
+	home := t.TempDir()
+	selector := filepath.Join(t.TempDir(), "selector.json")
+	if err := os.WriteFile(selector, []byte(differenceSelector), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(home, ".lotel", "data")
+	metricDir := filepath.Join(dataDir, "metrics")
+	if err := os.MkdirAll(metricDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metricDir, "metrics.jsonl"), []byte(differenceData+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dataDir, "lotel.db")
+	if err := storage.WithDB(context.Background(), path, func(db *sql.DB) error {
+		_, err := storage.IngestAll(db, dataDir)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- storage.WithDB(context.Background(), path, func(*sql.DB) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCLIHelper$", "--", "query", "metric-difference", "--selector", selector, "--from-ns", "1700000000000000001", "--to-ns", "1700000000000000002")
+	cmd.Env = append(os.Environ(), "HOME="+home, "LOTEL_CLI_HELPER=1")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Start(); err != nil {
+		close(release)
+		<-holderDone
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		close(release)
+		<-holderDone
+		t.Fatalf("command finished while database was locked: %v, %s", err, stderr.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if err := <-holderDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("command did not finish after lock release: %v, %s", err, stderr.String())
+	}
+	var result storage.MetricDifference
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result.Difference != "7" {
+		t.Fatalf("unexpected result after lock release: %s (%v)", stdout.String(), err)
+	}
 }
 
 func TestMetricDifferenceCLI(t *testing.T) {
@@ -89,5 +156,66 @@ func TestMetricDifferenceCLI(t *testing.T) {
 	}
 	if result.Difference != "7" || result.ElapsedNano != "1" || len(result.Assumptions) != 2 {
 		t.Fatalf("unexpected result: %s", out)
+	}
+}
+
+type blockingMetricWriter struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w *blockingMetricWriter) Write(p []byte) (int, error) {
+	close(w.started)
+	<-w.release
+	return len(p), nil
+}
+
+func TestMetricDifferenceReleasesLockBeforeOutput(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	selector := filepath.Join(t.TempDir(), "selector.json")
+	if err := os.WriteFile(selector, []byte(differenceSelector), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(home, ".lotel", "data")
+	metricDir := filepath.Join(dataDir, "metrics")
+	if err := os.MkdirAll(metricDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metricDir, "metrics.jsonl"), []byte(differenceData+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dataDir, "lotel.db")
+	if err := storage.WithDB(context.Background(), path, func(db *sql.DB) error { _, err := storage.IngestAll(db, dataDir); return err }); err != nil {
+		t.Fatal(err)
+	}
+	writer := &blockingMetricWriter{started: make(chan struct{}), release: make(chan struct{})}
+	cmd := metricDifferenceCommand()
+	cmd.SetOut(writer)
+	cmd.SetArgs([]string{"--selector", selector, "--from-ns", "1700000000000000001", "--to-ns", "1700000000000000002"})
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+	select {
+	case <-writer.started:
+	case err := <-done:
+		t.Fatalf("command finished before writing: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("command did not reach output")
+	}
+	released := false
+	defer func() {
+		if !released {
+			close(writer.release)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := storage.WithDB(ctx, path, func(*sql.DB) error { return nil }); err != nil {
+		t.Fatalf("database remained locked while output blocked: %v", err)
+	}
+	close(writer.release)
+	released = true
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

@@ -170,3 +170,18 @@ func TestMetricDifferenceCanExceedSignedIntegerRange(t *testing.T) {
 		t.Fatalf("overflow: %+v %v", got, err)
 	}
 }
+
+func TestMetricDifferenceSkipsUnrelatedNonfiniteAttributes(t *testing.T) {
+	first := differenceTestPoint("1700000000000000001", "1600000000000000000", "10")
+	last := differenceTestPoint("1700000000000000002", "1600000000000000000", "20")
+	selector := metricEnvelope("A", first)
+	unrelated := strings.Replace(metricEnvelope("A", first), `"intValue":"7"`, `"doubleValue":"NaN"`, 1)
+	db := ingestMetricsForDifference(t, unrelated, metricEnvelope("A", first+","+last))
+	got, err := QueryMetricDifference(db, []byte(selector), 1700000000000000001, 1700000000000000002)
+	if err != nil || got.Difference != "10" {
+		t.Fatalf("unrelated nonfinite attribute: %+v %v", got, err)
+	}
+	if err := ValidateMetricSelector([]byte(unrelated)); err == nil {
+		t.Fatal("nonfinite selector accepted")
+	}
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -32,13 +33,12 @@ func metricDifferenceCommand() *cobra.Command {
 			if err := storage.ValidateMetricSelector(input); err != nil {
 				return fmt.Errorf("invalid metric selector: %w", err)
 			}
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-			result, err := storage.QueryMetricDifference(db, input, from, to)
-			if err != nil {
+			var result storage.MetricDifference
+			if err := withDatabase(func(_ *cobra.Command, _ []string, db *sql.DB) error {
+				var queryErr error
+				result, queryErr = storage.QueryMetricDifference(db, input, from, to)
+				return queryErr
+			})(cmd, args); err != nil {
 				return err
 			}
 			encoder := json.NewEncoder(cmd.OutOrStdout())
