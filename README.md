@@ -272,11 +272,16 @@ child span identities. Each endpoint contains `service.name` and
 Duplicate trace/span identities are excluded rather than
 guessed. The `exclusions` counts categorize each excluded SERVER record once, in
 the order shown in the JSON. Duplicate child records count individually there.
-Missing or invalid IDs, missing parents, ambiguous identities, unknown services,
+Missing or invalid IDs, missing parents, ambiguous identities, invalid projected
+service identity types, unknown services,
 non-client parents, and same-service pairs are excluded. An `unknown` service
 can be either a real name or the ingestion fallback, so both are excluded. SDK
-fallback names `unknown_service` and `unknown_service:<language>` are also
+fallback names `unknown_service` and `unknown_service:<executable>` are also
 excluded, even when used as a literal service name.
+The report excludes identity attributes that the projection identifies as
+non-string values. Some OTLP values, including bytes and special floating-point
+values, project as strings, so their original types cannot always be identified.
+Legacy spans without projected resource attributes use their stored service name.
 Sampling, missing instrumentation, retention, and ingestion delays can hide
 edges. Messaging spans and span links are not represented. This report is not a
 complete topology or a request-volume estimate.

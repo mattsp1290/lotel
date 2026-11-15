@@ -156,3 +156,75 @@ func TestDependenciesServiceIdentityAndSDKDefaults(t *testing.T) {
 		t.Fatalf("edges: %+v; exclusions: %+v", report.Edges, report.Exclusions)
 	}
 }
+
+func TestDependenciesRejectNonStringIdentityAttributes(t *testing.T) {
+	dir := t.TempDir()
+	db, err := OpenDB(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	at := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	type identity struct{ name, namespace map[string]any }
+	text := func(value string) map[string]any { return map[string]any{"stringValue": value} }
+	number := map[string]any{"intValue": "42"}
+	pairs := []struct{ source, target identity }{
+		{identity{number, nil}, identity{text("target"), nil}},
+		{identity{text("source"), nil}, identity{number, nil}},
+		{identity{text("source"), number}, identity{text("target"), nil}},
+		{identity{text("source"), nil}, identity{text("target"), number}},
+		{identity{text("42"), nil}, identity{text("target"), nil}},
+		{identity{text("source"), nil}, identity{text("target"), text("42")}},
+		{identity{text("source"), map[string]any{}}, identity{text("target"), nil}},
+	}
+	var resources []any
+	for i, pair := range pairs {
+		for j, id := range []identity{pair.source, pair.target} {
+			attrs := []any{map[string]any{"key": "service.name", "value": id.name}}
+			if id.namespace != nil {
+				attrs = append(attrs, map[string]any{"key": "service.namespace", "value": id.namespace})
+			}
+			span := map[string]any{"traceId": fmt.Sprintf("%032x", i+1), "spanId": fmt.Sprintf("%016x", j+1), "name": "test", "kind": 3 - j, "startTimeUnixNano": fmt.Sprint(at.UnixNano()), "endTimeUnixNano": fmt.Sprint(at.UnixNano())}
+			if j == 1 {
+				span["parentSpanId"] = "0000000000000001"
+			}
+			resources = append(resources, map[string]any{"resource": map[string]any{"attributes": attrs}, "scopeSpans": []any{map[string]any{"spans": []any{span}}}})
+		}
+	}
+	data := filepath.Join(dir, "data", "traces")
+	if err := os.MkdirAll(data, 0755); err != nil {
+		t.Fatal(err)
+	}
+	line, err := json.Marshal(map[string]any{"resourceSpans": resources})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, "traces.jsonl"), append(line, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := IngestAll(db, filepath.Join(dir, "data")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO traces (trace_id, span_id, parent_span_id, name, kind, start_time, end_time, service_name, date) VALUES
+		('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '0000000000000001', NULL, 'client', 3, ?, ?, 'legacy', CURRENT_DATE),
+		('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '0000000000000002', '0000000000000001', 'server', 2, ?, ?, 'target', CURRENT_DATE)`, at, at, at, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := QueryDependencies(db, DependencyOptions{Since: at, Until: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DependencyEdge{
+		{SourceService: "42", TargetService: "target", ObservedCalls: 1},
+		{SourceService: "legacy", TargetService: "target", ObservedCalls: 1},
+		{SourceService: "source", TargetService: "target", ObservedCalls: 1},
+		{SourceService: "source", TargetNamespace: "42", TargetService: "target", ObservedCalls: 1},
+	}
+	if !reflect.DeepEqual(report.Edges, want) {
+		t.Fatalf("edges: %+v, exclusions: %+v", report.Edges, report.Exclusions)
+	}
+	if report.Exclusions.InvalidServiceIdentity != 4 {
+		t.Fatalf("exclusions: %+v", report.Exclusions)
+	}
+}

@@ -23,14 +23,15 @@ type DependencyEdge struct {
 }
 
 type DependencyExclusions struct {
-	InvalidChildID  int64 `json:"invalid_child_id"`
-	DuplicateChild  int64 `json:"duplicate_child"`
-	InvalidParentID int64 `json:"invalid_parent_id"`
-	MissingParent   int64 `json:"missing_parent"`
-	DuplicateParent int64 `json:"duplicate_parent"`
-	UnknownService  int64 `json:"unknown_service"`
-	NonClientParent int64 `json:"non_client_parent"`
-	SameService     int64 `json:"same_service"`
+	InvalidChildID         int64 `json:"invalid_child_id"`
+	DuplicateChild         int64 `json:"duplicate_child"`
+	InvalidParentID        int64 `json:"invalid_parent_id"`
+	MissingParent          int64 `json:"missing_parent"`
+	DuplicateParent        int64 `json:"duplicate_parent"`
+	InvalidServiceIdentity int64 `json:"invalid_service_identity"`
+	UnknownService         int64 `json:"unknown_service"`
+	NonClientParent        int64 `json:"non_client_parent"`
+	SameService            int64 `json:"same_service"`
 }
 
 type DependencyReport struct {
@@ -62,9 +63,13 @@ func QueryDependencies(db *sql.DB, opts DependencyOptions) (DependencyReport, er
 		WHERE i.n = 1
 	)
 	SELECT c.trace_id, c.span_id, c.parent_span_id, c.service_name,
-		coalesce(json_extract_string(c.resource_attributes, '$."service.namespace"'), ''), ci.n,
+		coalesce(json_extract_string(c.resource_attributes, '$."service.namespace"'), ''),
+		coalesce(json_type(c.resource_attributes, '$."service.name"') NOT IN ('VARCHAR', 'NULL'), false)
+		 OR coalesce(json_type(c.resource_attributes, '$."service.namespace"') NOT IN ('VARCHAR', 'NULL'), false), ci.n,
 		coalesce(pi.n, 0), p.kind, p.service_name,
-		coalesce(json_extract_string(p.resource_attributes, '$."service.namespace"'), '')
+		coalesce(json_extract_string(p.resource_attributes, '$."service.namespace"'), ''),
+		coalesce(json_type(p.resource_attributes, '$."service.name"') NOT IN ('VARCHAR', 'NULL'), false)
+		 OR coalesce(json_type(p.resource_attributes, '$."service.namespace"') NOT IN ('VARCHAR', 'NULL'), false)
 	FROM traces c
 	JOIN identities ci ON lower(c.trace_id) = ci.trace_key AND lower(c.span_id) = ci.span_key
 	LEFT JOIN identities pi ON lower(c.trace_id) = pi.trace_key AND lower(c.parent_span_id) = pi.span_key
@@ -80,9 +85,10 @@ func QueryDependencies(db *sql.DB, opts DependencyOptions) (DependencyReport, er
 	for rows.Next() {
 		var trace, child, target, targetNamespace, sourceNamespace string
 		var parent, source sql.NullString
+		var invalidTarget, invalidSource bool
 		var childCount, parentCount int64
 		var parentKind sql.NullInt64
-		if err := rows.Scan(&trace, &child, &parent, &target, &targetNamespace, &childCount, &parentCount, &parentKind, &source, &sourceNamespace); err != nil {
+		if err := rows.Scan(&trace, &child, &parent, &target, &targetNamespace, &invalidTarget, &childCount, &parentCount, &parentKind, &source, &sourceNamespace, &invalidSource); err != nil {
 			return report, fmt.Errorf("scanning dependencies: %w", err)
 		}
 		switch {
@@ -98,6 +104,8 @@ func QueryDependencies(db *sql.DB, opts DependencyOptions) (DependencyReport, er
 			report.Exclusions.MissingParent++
 		case parentCount != 1:
 			report.Exclusions.DuplicateParent++
+		case invalidSource || invalidTarget:
+			report.Exclusions.InvalidServiceIdentity++
 		case unknownDependencyService(target) || !source.Valid || unknownDependencyService(source.String):
 			report.Exclusions.UnknownService++
 		case !parentKind.Valid || parentKind.Int64 != 3:
