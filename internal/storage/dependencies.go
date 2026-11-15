@@ -15,9 +15,11 @@ type DependencyOptions struct {
 }
 
 type DependencyEdge struct {
-	SourceService string `json:"source_service"`
-	TargetService string `json:"target_service"`
-	ObservedCalls int64  `json:"observed_calls"`
+	SourceNamespace string `json:"source_namespace"`
+	SourceService   string `json:"source_service"`
+	TargetNamespace string `json:"target_namespace"`
+	TargetService   string `json:"target_service"`
+	ObservedCalls   int64  `json:"observed_calls"`
 }
 
 type DependencyExclusions struct {
@@ -41,6 +43,10 @@ func validDependencyID(id string, bytes int) bool {
 	return err == nil && len(decoded) == bytes && strings.Trim(id, "0") != ""
 }
 
+func unknownDependencyService(name string) bool {
+	return name == "" || name == "unknown" || name == "unknown_service" || strings.HasPrefix(name, "unknown_service:")
+}
+
 func QueryDependencies(db *sql.DB, opts DependencyOptions) (DependencyReport, error) {
 	report := DependencyReport{Edges: []DependencyEdge{}}
 	if opts.Since.IsZero() || opts.Until.IsZero() || opts.Since.After(opts.Until) {
@@ -55,8 +61,10 @@ func QueryDependencies(db *sql.DB, opts DependencyOptions) (DependencyReport, er
 		ON lower(t.trace_id) = i.trace_key AND lower(t.span_id) = i.span_key
 		WHERE i.n = 1
 	)
-	SELECT c.trace_id, c.span_id, c.parent_span_id, c.service_name, ci.n,
-		coalesce(pi.n, 0), p.kind, p.service_name
+	SELECT c.trace_id, c.span_id, c.parent_span_id, c.service_name,
+		coalesce(json_extract_string(c.resource_attributes, '$."service.namespace"'), ''), ci.n,
+		coalesce(pi.n, 0), p.kind, p.service_name,
+		coalesce(json_extract_string(p.resource_attributes, '$."service.namespace"'), '')
 	FROM traces c
 	JOIN identities ci ON lower(c.trace_id) = ci.trace_key AND lower(c.span_id) = ci.span_key
 	LEFT JOIN identities pi ON lower(c.trace_id) = pi.trace_key AND lower(c.parent_span_id) = pi.span_key
@@ -66,14 +74,15 @@ func QueryDependencies(db *sql.DB, opts DependencyOptions) (DependencyReport, er
 		return report, fmt.Errorf("querying dependencies: %w", err)
 	}
 	defer rows.Close()
-	type edgeKey struct{ source, target string }
+	type serviceKey struct{ namespace, name string }
+	type edgeKey struct{ source, target serviceKey }
 	counts := map[edgeKey]int64{}
 	for rows.Next() {
-		var trace, child, target string
+		var trace, child, target, targetNamespace, sourceNamespace string
 		var parent, source sql.NullString
 		var childCount, parentCount int64
 		var parentKind sql.NullInt64
-		if err := rows.Scan(&trace, &child, &parent, &target, &childCount, &parentCount, &parentKind, &source); err != nil {
+		if err := rows.Scan(&trace, &child, &parent, &target, &targetNamespace, &childCount, &parentCount, &parentKind, &source, &sourceNamespace); err != nil {
 			return report, fmt.Errorf("scanning dependencies: %w", err)
 		}
 		switch {
@@ -89,25 +98,31 @@ func QueryDependencies(db *sql.DB, opts DependencyOptions) (DependencyReport, er
 			report.Exclusions.MissingParent++
 		case parentCount != 1:
 			report.Exclusions.DuplicateParent++
-		case target == "" || target == "unknown" || !source.Valid || source.String == "" || source.String == "unknown":
+		case unknownDependencyService(target) || !source.Valid || unknownDependencyService(source.String):
 			report.Exclusions.UnknownService++
 		case !parentKind.Valid || parentKind.Int64 != 3:
 			report.Exclusions.NonClientParent++
-		case source.String == target:
+		case source.String == target && sourceNamespace == targetNamespace:
 			report.Exclusions.SameService++
 		default:
-			counts[edgeKey{source.String, target}]++
+			counts[edgeKey{serviceKey{sourceNamespace, source.String}, serviceKey{targetNamespace, target}}]++
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return report, err
 	}
 	for key, count := range counts {
-		report.Edges = append(report.Edges, DependencyEdge{key.source, key.target, count})
+		report.Edges = append(report.Edges, DependencyEdge{SourceNamespace: key.source.namespace, SourceService: key.source.name, TargetNamespace: key.target.namespace, TargetService: key.target.name, ObservedCalls: count})
 	}
 	sort.Slice(report.Edges, func(i, j int) bool {
+		if report.Edges[i].SourceNamespace != report.Edges[j].SourceNamespace {
+			return report.Edges[i].SourceNamespace < report.Edges[j].SourceNamespace
+		}
 		if report.Edges[i].SourceService != report.Edges[j].SourceService {
 			return report.Edges[i].SourceService < report.Edges[j].SourceService
+		}
+		if report.Edges[i].TargetNamespace != report.Edges[j].TargetNamespace {
+			return report.Edges[i].TargetNamespace < report.Edges[j].TargetNamespace
 		}
 		return report.Edges[i].TargetService < report.Edges[j].TargetService
 	})

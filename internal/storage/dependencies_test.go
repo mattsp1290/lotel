@@ -77,7 +77,7 @@ func TestDependenciesFromIngestedSpans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEdges := []DependencyEdge{{"alpha", "beta", 1}, {"gamma", "delta", 1}}
+	wantEdges := []DependencyEdge{{SourceService: "alpha", TargetService: "beta", ObservedCalls: 1}, {SourceService: "gamma", TargetService: "delta", ObservedCalls: 1}}
 	wantExcluded := DependencyExclusions{InvalidChildID: 2, DuplicateChild: 3, InvalidParentID: 2, MissingParent: 2, DuplicateParent: 1, UnknownService: 2, NonClientParent: 1, SameService: 1}
 	if !reflect.DeepEqual(report.Edges, wantEdges) || report.Exclusions != wantExcluded {
 		t.Fatalf("report: %+v, exclusions: %+v", report.Edges, report.Exclusions)
@@ -88,5 +88,71 @@ func TestDependenciesFromIngestedSpans(t *testing.T) {
 	}
 	if _, err := QueryDependencies(db, DependencyOptions{Since: base.Add(time.Second), Until: base}); err == nil {
 		t.Fatal("accepted reversed window")
+	}
+}
+
+func TestDependenciesServiceIdentityAndSDKDefaults(t *testing.T) {
+	dir := t.TempDir()
+	db, err := OpenDB(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	at := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	type endpoint struct{ namespace, name string }
+	pairs := []struct{ source, target endpoint }{
+		{endpoint{"one", "api"}, endpoint{"two", "api"}},
+		{endpoint{"three", "api"}, endpoint{"two", "api"}},
+		{endpoint{"one", "api"}, endpoint{"", "api"}},
+		{endpoint{"", "api"}, endpoint{"two", "api"}},
+		{endpoint{"two", "api"}, endpoint{"one", "api"}},
+		{endpoint{"", "api"}, endpoint{"", "api"}},
+		{endpoint{"", "unknown_service"}, endpoint{"", "api"}},
+		{endpoint{"", "unknown_service:go"}, endpoint{"", "api"}},
+		{endpoint{"", "api"}, endpoint{"", "unknown_service"}},
+		{endpoint{"", "api"}, endpoint{"", "unknown_service:python"}},
+	}
+	var resources []any
+	for i, pair := range pairs {
+		trace := fmt.Sprintf("%032x", i+1)
+		for j, endpoint := range []endpoint{pair.source, pair.target} {
+			attrs := []any{map[string]any{"key": "service.name", "value": map[string]any{"stringValue": endpoint.name}}}
+			if endpoint.namespace != "" || (i == 5 && j == 1) {
+				attrs = append(attrs, map[string]any{"key": "service.namespace", "value": map[string]any{"stringValue": endpoint.namespace}})
+			}
+			item := map[string]any{"traceId": trace, "spanId": fmt.Sprintf("%016x", j+1), "name": "test", "kind": 3 - j, "startTimeUnixNano": fmt.Sprint(at.UnixNano()), "endTimeUnixNano": fmt.Sprint(at.UnixNano())}
+			if j == 1 {
+				item["parentSpanId"] = "0000000000000001"
+			}
+			resources = append(resources, map[string]any{"resource": map[string]any{"attributes": attrs}, "scopeSpans": []any{map[string]any{"spans": []any{item}}}})
+		}
+	}
+	data := filepath.Join(dir, "data", "traces")
+	if err := os.MkdirAll(data, 0755); err != nil {
+		t.Fatal(err)
+	}
+	line, err := json.Marshal(map[string]any{"resourceSpans": resources})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, "traces.jsonl"), append(line, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := IngestAll(db, filepath.Join(dir, "data")); err != nil {
+		t.Fatal(err)
+	}
+	report, err := QueryDependencies(db, DependencyOptions{Since: at, Until: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DependencyEdge{
+		{SourceService: "api", TargetNamespace: "two", TargetService: "api", ObservedCalls: 1},
+		{SourceNamespace: "one", SourceService: "api", TargetService: "api", ObservedCalls: 1},
+		{SourceNamespace: "one", SourceService: "api", TargetNamespace: "two", TargetService: "api", ObservedCalls: 1},
+		{SourceNamespace: "three", SourceService: "api", TargetNamespace: "two", TargetService: "api", ObservedCalls: 1},
+		{SourceNamespace: "two", SourceService: "api", TargetNamespace: "one", TargetService: "api", ObservedCalls: 1},
+	}
+	if !reflect.DeepEqual(report.Edges, want) || report.Exclusions.UnknownService != 4 || report.Exclusions.SameService != 1 {
+		t.Fatalf("edges: %+v; exclusions: %+v", report.Edges, report.Exclusions)
 	}
 }

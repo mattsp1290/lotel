@@ -267,12 +267,16 @@ from a CLIENT span to its direct SERVER child. The child's projected start time
 selects the window at microsecond precision. The parent and uniqueness checks
 use all retained spans, including spans outside the window. The start is required;
 the inclusive end defaults to now and cannot be in the future. Edges count unique
-child span identities. Duplicate trace/span identities are excluded rather than
+child span identities. Each endpoint contains `service.name` and
+`service.namespace`. An absent namespace and an empty namespace are equivalent.
+Duplicate trace/span identities are excluded rather than
 guessed. The `exclusions` counts categorize each excluded SERVER record once, in
 the order shown in the JSON. Duplicate child records count individually there.
 Missing or invalid IDs, missing parents, ambiguous identities, unknown services,
 non-client parents, and same-service pairs are excluded. An `unknown` service
-can be either a real name or the ingestion fallback, so both are excluded.
+can be either a real name or the ingestion fallback, so both are excluded. SDK
+fallback names `unknown_service` and `unknown_service:<language>` are also
+excluded, even when used as a literal service name.
 Sampling, missing instrumentation, retention, and ingestion delays can hide
 edges. Messaging spans and span links are not represented. This report is not a
 complete topology or a request-volume estimate.
