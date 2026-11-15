@@ -196,6 +196,26 @@ func TestDependenciesRejectNonStringIdentityAttributes(t *testing.T) {
 			resources = append(resources, map[string]any{"resource": map[string]any{"attributes": attrs}, "scopeSpans": []any{map[string]any{"spans": []any{span}}}})
 		}
 	}
+	for badEndpoint := 0; badEndpoint < 2; badEndpoint++ {
+		for endpoint := 0; endpoint < 2; endpoint++ {
+			name := "source"
+			if endpoint == 1 {
+				name = "target"
+			}
+			attrs := []any{map[string]any{"key": "service.name", "value": text(name)}}
+			if endpoint == badEndpoint {
+				attrs = []any{
+					map[string]any{"key": "service.name", "value": number},
+					map[string]any{"key": "service.name", "value": text("actual-projected-name")},
+				}
+			}
+			span := map[string]any{"traceId": fmt.Sprintf("%032x", badEndpoint+200), "spanId": fmt.Sprintf("%016x", endpoint+1), "name": "test", "kind": 3 - endpoint, "startTimeUnixNano": fmt.Sprint(at.UnixNano()), "endTimeUnixNano": fmt.Sprint(at.UnixNano())}
+			if endpoint == 1 {
+				span["parentSpanId"] = "0000000000000001"
+			}
+			resources = append(resources, map[string]any{"resource": map[string]any{"attributes": attrs}, "scopeSpans": []any{map[string]any{"spans": []any{span}}}})
+		}
+	}
 	data := filepath.Join(dir, "data", "traces")
 	if err := os.MkdirAll(data, 0755); err != nil {
 		t.Fatal(err)
@@ -229,7 +249,7 @@ func TestDependenciesRejectNonStringIdentityAttributes(t *testing.T) {
 	if !reflect.DeepEqual(report.Edges, want) {
 		t.Fatalf("edges: %+v, exclusions: %+v", report.Edges, report.Exclusions)
 	}
-	if report.Exclusions != (DependencyExclusions{InvalidServiceIdentity: 8}) {
+	if report.Exclusions != (DependencyExclusions{InvalidServiceIdentity: 10}) {
 		t.Fatalf("exclusions: %+v", report.Exclusions)
 	}
 }

@@ -65,11 +65,13 @@ func QueryDependencies(db *sql.DB, opts DependencyOptions) (DependencyReport, er
 	SELECT c.trace_id, c.span_id, c.parent_span_id, c.service_name,
 		coalesce(json_extract_string(c.resource_attributes, '$."service.namespace"'), ''),
 		coalesce(json_type(c.resource_attributes, '$."service.name"') <> 'VARCHAR', false)
-		 OR coalesce(json_type(c.resource_attributes, '$."service.namespace"') <> 'VARCHAR', false), ci.n,
+		 OR coalesce(json_type(c.resource_attributes, '$."service.namespace"') <> 'VARCHAR', false)
+		 OR coalesce(json_extract_string(c.resource_attributes, '$."service.name"') <> c.service_name, false), ci.n,
 		coalesce(pi.n, 0), p.kind, p.service_name,
 		coalesce(json_extract_string(p.resource_attributes, '$."service.namespace"'), ''),
 		coalesce(json_type(p.resource_attributes, '$."service.name"') <> 'VARCHAR', false)
 		 OR coalesce(json_type(p.resource_attributes, '$."service.namespace"') <> 'VARCHAR', false)
+		 OR coalesce(json_extract_string(p.resource_attributes, '$."service.name"') <> p.service_name, false)
 	FROM traces c
 	JOIN identities ci ON lower(c.trace_id) = ci.trace_key AND lower(c.span_id) = ci.span_key
 	LEFT JOIN identities pi ON lower(c.trace_id) = pi.trace_key AND lower(c.parent_span_id) = pi.span_key
