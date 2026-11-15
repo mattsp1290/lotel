@@ -305,6 +305,26 @@ func TestOTLPQueryRejectsUnsupportedOptions(t *testing.T) {
 	}
 }
 
+func TestOTLPQueryRejectsReversedTimeWindow(t *testing.T) {
+	db, err := OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	root := t.TempDir()
+	writeOTLPSignal(t, root, "traces", `{"resourceSpans":[{"scopeSpans":[{"spans":[{"startTimeUnixNano":"1000000000","endTimeUnixNano":"4000000000"}]}]}]}`+"\n")
+	if _, err := IngestAll(db, root); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := QueryOTLP(db, "traces", QueryOptions{Since: time.Unix(3, 0), Until: time.Unix(3, 0)})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("equal bounds did not select the spanning envelope: %v %+v", err, rows)
+	}
+	if _, err := QueryOTLP(db, "traces", QueryOptions{Since: time.Unix(3, 0), Until: time.Unix(2, 0)}); err == nil {
+		t.Fatal("accepted reversed time window for a spanning envelope")
+	}
+}
+
 func TestOTLPTransactionRollback(t *testing.T) {
 	db, err := OpenDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

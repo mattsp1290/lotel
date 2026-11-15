@@ -219,6 +219,9 @@ func QueryOTLP(db *sql.DB, signal string, opts QueryOptions) ([]OTLPResult, erro
 	if opts.Limit < 0 {
 		return nil, fmt.Errorf("limit cannot be negative")
 	}
+	if !opts.Since.IsZero() && !opts.Until.IsZero() && opts.Since.After(opts.Until) {
+		return nil, fmt.Errorf("since must not be after until")
+	}
 	query := `SELECT signal,service_name,CAST(first_nano AS VARCHAR),CAST(last_nano AS VARCHAR),CAST(payload AS VARCHAR) FROM otlp_envelopes WHERE signal=?`
 	args := []any{signal}
 	if opts.Service != "" {
