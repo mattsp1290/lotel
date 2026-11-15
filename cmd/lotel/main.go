@@ -221,20 +221,9 @@ func main() {
 				return err
 			}
 			logOpts := storage.LogQueryOptions{QueryOptions: opts}
-			if cmd.Flags().Changed("min-severity") {
-				severity, _ := cmd.Flags().GetString("min-severity")
-				var ok bool
-				logOpts.MinSeverity, ok = storage.ParseLogSeverity(severity)
-				if !ok {
-					return fmt.Errorf("invalid --min-severity %q: use trace, debug, info, warn, error, or fatal", severity)
-				}
-			}
-			if cmd.Flags().Changed("body-contains") {
-				body, _ := cmd.Flags().GetString("body-contains")
-				if body == "" {
-					return fmt.Errorf("--body-contains cannot be empty")
-				}
-				logOpts.BodyContains = &body
+			logOpts.MinSeverity, logOpts.BodyContains, err = parseLogFilters(cmd)
+			if err != nil {
+				return err
 			}
 			db, err := openDB()
 			if err != nil {
@@ -302,7 +291,7 @@ func main() {
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd, queryLogsCmd} {
 		cmd.Flags().StringArray("attr", nil, "attribute key=value; repeat for AND; matches compact JSON string form, null never matches")
 	}
-	queryCmd.AddCommand(discoveryCommand("services"), discoveryCommand("operations"), spanStatsCommand(), traceCommand(), queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
+	queryCmd.AddCommand(discoveryCommand("services"), discoveryCommand("operations"), spanStatsCommand(), logStatsCommand(), traceCommand(), queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
 
 	// --- prune ---
 	var olderThan string

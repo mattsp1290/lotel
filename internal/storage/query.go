@@ -55,6 +55,29 @@ type LogQueryOptions struct {
 	BodyContains *string
 }
 
+func validateLogFilters(severity int, body *string) error {
+	if !validLogSeverity(severity) {
+		return fmt.Errorf("invalid minimum severity")
+	}
+	if body != nil && *body == "" {
+		return fmt.Errorf("body search cannot be empty")
+	}
+	return nil
+}
+
+func appendLogFilters(query *string, severity int, body *string) []any {
+	var args []any
+	if severity != 0 {
+		*query += " AND severity_number BETWEEN ? AND 24"
+		args = append(args, severity)
+	}
+	if body != nil {
+		*query += " AND contains(lower(body), lower(?))"
+		args = append(args, *body)
+	}
+	return args
+}
+
 type queryer interface {
 	Query(string, ...any) (*sql.Rows, error)
 }
@@ -256,23 +279,13 @@ func QueryLogs(db queryer, opts LogQueryOptions) ([]LogResult, error) {
 	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
-	if !validLogSeverity(opts.MinSeverity) {
-		return nil, fmt.Errorf("invalid minimum severity")
-	}
-	if opts.BodyContains != nil && *opts.BodyContains == "" {
-		return nil, fmt.Errorf("body search cannot be empty")
+	if err := validateLogFilters(opts.MinSeverity, opts.BodyContains); err != nil {
+		return nil, err
 	}
 	query := `SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR), CAST(json_object('observed_timestamp',strftime("observed_timestamp", '%Y-%m-%dT%H:%M:%S.%fZ'),'event_name',"event_name",'body_value',body_json,'flags',"flags",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version") AS VARCHAR) FROM logs WHERE 1=1`
 	args := buildWhere(&query, opts.QueryOptions, "timestamp")
 	args = append(args, buildFilters(&query, opts.QueryOptions, "")...)
-	if opts.MinSeverity != 0 {
-		query += " AND severity_number BETWEEN ? AND 24"
-		args = append(args, opts.MinSeverity)
-	}
-	if opts.BodyContains != nil {
-		query += " AND contains(lower(body), lower(?))"
-		args = append(args, *opts.BodyContains)
-	}
+	args = append(args, appendLogFilters(&query, opts.MinSeverity, opts.BodyContains)...)
 
 	query += " ORDER BY timestamp ASC"
 	if opts.Limit > 0 {
