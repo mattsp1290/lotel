@@ -6,6 +6,16 @@ import (
 
 const MaxRecentLimit = 1000
 
+func buildRecentWhere(query *string, opts QueryOptions, timeColumn string) []any {
+	*query += fmt.Sprintf(" AND %s >= ? AND %s <= ?", timeColumn, timeColumn)
+	args := []any{opts.Since, opts.Until}
+	if opts.Service != "" {
+		*query += " AND service_name = ?"
+		args = append(args, opts.Service)
+	}
+	return args
+}
+
 func recentOptions(opts QueryOptions) (QueryOptions, error) {
 	if opts.Since.IsZero() || opts.Until.IsZero() || opts.Since.After(opts.Until) || opts.Limit < 1 || opts.Limit > MaxRecentLimit {
 		return opts, fmt.Errorf("invalid recent query window or limit")

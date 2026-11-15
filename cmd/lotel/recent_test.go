@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,6 +114,84 @@ func TestRecentCLI(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(unused, ".lotel")); !os.IsNotExist(err) {
 				t.Fatalf("invalid request opened database: %v", err)
+			}
+			flags := []string{"--service=", "--trace-id="}
+			if signal == "traces" {
+				flags = append(flags, "--name=")
+			} else {
+				flags = append(flags, "--event-name=")
+			}
+			for _, flag := range flags {
+				unused := t.TempDir()
+				if _, err := invoke(unused, signal, "--limit", "1", flag); err == nil {
+					t.Fatalf("accepted %s", flag)
+				}
+				if _, err := os.Stat(filepath.Join(unused, ".lotel")); !os.IsNotExist(err) {
+					t.Fatalf("%s opened database: %v", flag, err)
+				}
+			}
+			out, err = invoke(home, signal, "--limit", "1", "--since", "0001-01-01T00:00:00.000000001Z", "--until", "0001-01-01T00:00:00.000000002Z")
+			if err != nil || json.Unmarshal(out, &result) != nil || len(result.Records) != 0 {
+				t.Fatalf("year-one empty projected window included records: %s %v", out, err)
+			}
+		})
+	}
+}
+
+func TestRecentCLIStableForIngestedSignedZero(t *testing.T) {
+	build := func(values []string) string {
+		home := t.TempDir()
+		path := filepath.Join(home, ".lotel", "data")
+		for _, signal := range []string{"traces", "logs"} {
+			dir := filepath.Join(path, signal)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			var lines strings.Builder
+			for _, value := range values {
+				resource := fmt.Sprintf(`{"attributes":[{"key":"service.name","value":{"stringValue":"signed-zero"}},{"key":"resource.value","value":{"doubleValue":%s}}]}`, value)
+				if signal == "traces" {
+					fmt.Fprintf(&lines, `{"resourceSpans":[{"resource":%s,"scopeSpans":[{"spans":[{"traceId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","spanId":"1111111111111111","name":"same","startTimeUnixNano":"1735689601000000000","endTimeUnixNano":"1735689601000000000","attributes":[{"key":"value","value":{"doubleValue":%s}}],"events":[{"name":"event","attributes":[{"key":"value","value":{"doubleValue":%s}}]}]}]}]}]}`+"\n", resource, value, value)
+				} else {
+					fmt.Fprintf(&lines, `{"resourceLogs":[{"resource":%s,"scopeLogs":[{"logRecords":[{"timeUnixNano":"1735689601000000000","severityNumber":17,"body":{"stringValue":"same"},"attributes":[{"key":"value","value":{"doubleValue":%s}}]}]}]}]}`+"\n", resource, value)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(dir, signal+".jsonl"), []byte(lines.String()), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		db, err := storage.OpenDB(filepath.Join(path, "lotel.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := storage.IngestAll(db, path); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return home
+	}
+	first := build([]string{"-0.0", "0.0"})
+	second := build([]string{"0.0", "-0.0"})
+	for _, signal := range []string{"traces", "logs"} {
+		t.Run(signal, func(t *testing.T) {
+			query := func(home, limit string) string {
+				cmd := exec.Command(os.Args[0], "-test.run=^TestCLIHelper$", "--", "query", "recent", signal, "--since", "2025-01-01T00:00:00Z", "--until", "2025-01-01T00:00:02Z", "--limit", limit)
+				cmd.Env = append(os.Environ(), "HOME="+home, "LOTEL_CLI_HELPER=1")
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("query: %s: %v", out, err)
+				}
+				return string(out)
+			}
+			all := query(first, "2")
+			if !strings.Contains(all, `"value":-0`) || !strings.Contains(all, `"value":0`) {
+				t.Fatalf("fixture did not preserve signed zero: %s", all)
+			}
+			a, b := query(first, "1"), query(second, "1")
+			if a != b {
+				t.Fatalf("ordering depends on insertion order:\n%s\n%s", a, b)
 			}
 		})
 	}

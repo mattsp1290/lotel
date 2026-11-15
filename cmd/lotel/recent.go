@@ -34,6 +34,18 @@ func recentCommand() *cobra.Command {
 				if !validBoundedWindow(start, end, now) || limit < 1 || limit > storage.MaxRecentLimit {
 					return fmt.Errorf("invalid recent query window or limit (limit must be 1 to %d)", storage.MaxRecentLimit)
 				}
+				exactFlags := []string{"service", "trace-id"}
+				if signal == "traces" {
+					exactFlags = append(exactFlags, "name")
+				} else {
+					exactFlags = append(exactFlags, "event-name")
+				}
+				for _, name := range exactFlags {
+					value, _ := cmd.Flags().GetString(name)
+					if cmd.Flags().Changed(name) && value == "" {
+						return fmt.Errorf("--%s must not be empty", name)
+					}
+				}
 				opts, err := parseCommandQueryOpts(cmd, service, "", "", limit)
 				if err != nil {
 					return err
