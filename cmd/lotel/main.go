@@ -223,9 +223,8 @@ func main() {
 			logOpts := storage.LogQueryOptions{QueryOptions: opts}
 			if cmd.Flags().Changed("min-severity") {
 				severity, _ := cmd.Flags().GetString("min-severity")
-				levels := map[string]int{"trace": 1, "debug": 5, "info": 9, "warn": 13, "error": 17, "fatal": 21}
 				var ok bool
-				logOpts.MinSeverity, ok = levels[severity]
+				logOpts.MinSeverity, ok = storage.ParseLogSeverity(severity)
 				if !ok {
 					return fmt.Errorf("invalid --min-severity %q: use trace, debug, info, warn, error, or fatal", severity)
 				}

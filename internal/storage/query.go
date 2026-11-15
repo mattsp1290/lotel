@@ -30,6 +30,25 @@ type TraceQueryOptions struct {
 	MinDuration *time.Duration
 }
 
+var logSeverities = map[string]int{"trace": 1, "debug": 5, "info": 9, "warn": 13, "error": 17, "fatal": 21}
+
+func ParseLogSeverity(name string) (int, bool) {
+	severity, ok := logSeverities[name]
+	return severity, ok
+}
+
+func validLogSeverity(severity int) bool {
+	if severity == 0 {
+		return true
+	}
+	for _, value := range logSeverities {
+		if severity == value {
+			return true
+		}
+	}
+	return false
+}
+
 type LogQueryOptions struct {
 	QueryOptions
 	MinSeverity  int
@@ -237,7 +256,7 @@ func QueryLogs(db queryer, opts LogQueryOptions) ([]LogResult, error) {
 	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
-	if opts.MinSeverity != 0 && opts.MinSeverity != 1 && opts.MinSeverity != 5 && opts.MinSeverity != 9 && opts.MinSeverity != 13 && opts.MinSeverity != 17 && opts.MinSeverity != 21 {
+	if !validLogSeverity(opts.MinSeverity) {
 		return nil, fmt.Errorf("invalid minimum severity")
 	}
 	if opts.BodyContains != nil && *opts.BodyContains == "" {

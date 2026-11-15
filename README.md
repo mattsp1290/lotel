@@ -260,9 +260,10 @@ have a projected duration of zero.
 For logs, `--min-severity` accepts `trace`, `debug`, `info`, `warn`, `error`,
 or `fatal`. It compares the OpenTelemetry severity number and excludes
 unspecified and out-of-range values. `--body-contains` performs a literal,
-case-insensitive substring match on the projected body text. Structured bodies
-are represented as JSON text, so keys and JSON syntax can match. This is not a
-typed field search. The substring must not be empty.
+case-insensitive substring match on projected body text using DuckDB lowercase
+conversion. This is not full Unicode case folding. Structured bodies appear as
+JSON text, so keys and JSON syntax can match. This is not a typed field search.
+The substring must not be empty.
 
 Generic queries order oldest first. `genai calls` orders newest first.
 Usage defaults to grouping by provider, model, and operation. It reports token

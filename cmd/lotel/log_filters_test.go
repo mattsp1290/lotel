@@ -12,20 +12,6 @@ import (
 	"github.com/mattsp1290/lotel/internal/storage"
 )
 
-func TestLogFiltersHelper(t *testing.T) {
-	if os.Getenv("LOTEL_LOG_FILTERS_HELPER") != "1" {
-		return
-	}
-	for i, arg := range os.Args {
-		if arg == "--" {
-			os.Args = append([]string{"lotel"}, os.Args[i+1:]...)
-			main()
-			os.Exit(0)
-		}
-	}
-	t.Fatal("missing command arguments")
-}
-
 func TestLogFiltersCLI(t *testing.T) {
 	home := t.TempDir()
 	data := filepath.Join(home, ".lotel", "data")
@@ -58,8 +44,8 @@ func TestLogFiltersCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	invoke := func(home string, args ...string) ([]storage.LogResult, string, error) {
-		cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestLogFiltersHelper$", "--", "query", "logs"}, args...)...)
-		cmd.Env = append(os.Environ(), "HOME="+home, "LOTEL_LOG_FILTERS_HELPER=1")
+		cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestCLIHelper$", "--", "query", "logs"}, args...)...)
+		cmd.Env = append(os.Environ(), "HOME="+home, "LOTEL_CLI_HELPER=1")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return nil, string(output), err
