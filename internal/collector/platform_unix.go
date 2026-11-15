@@ -13,7 +13,7 @@ func nativeSupported() bool {
 	return runtime.GOOS == "darwin" || runtime.GOOS == "linux"
 }
 
-func configureNativeProcess(command *exec.Cmd) {
+func configureRuntimeProcess(command *exec.Cmd) {
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
 

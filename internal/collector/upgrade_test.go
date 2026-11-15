@@ -2,6 +2,9 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,5 +84,37 @@ func TestInspectForUpgradeAbsentCreatesNoState(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, stateDir)); !os.IsNotExist(err) {
 		t.Fatalf("created state directory: %v", err)
+	}
+}
+
+func TestInspectForUpgradePreservesNativeBackend(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	dir, err := os.MkdirTemp("", "lotel-upgrade-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket := filepath.Join(dir, "control.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(Status{Backend: "native", Running: true, Healthy: true})
+	})}
+	go server.Serve(listener)
+	defer server.Close()
+	state := &State{Backend: "native", ConfigPath: "/custom/native.yaml", ControlSocket: socket, ControlToken: "token"}
+	if err := writeState(state); err != nil {
+		t.Fatal(err)
+	}
+	status, err := InspectForUpgrade(context.Background())
+	if err != nil || !status.Running || status.Backend != "native" || status.ConfigPath != state.ConfigPath {
+		t.Fatalf("upgrade lost native lifecycle: %+v %v", status, err)
 	}
 }

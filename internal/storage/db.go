@@ -3,38 +3,12 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
-	"sync"
 
 	_ "github.com/marcboeker/go-duckdb"
 )
 
-var (
-	dbOnce sync.Once
-	dbInst *sql.DB
-	dbErr  error
-)
-
-// DB returns the singleton DuckDB connection.
-func DB() (*sql.DB, error) {
-	dbOnce.Do(func() {
-		dbPath, err := dbPath()
-		if err != nil {
-			dbErr = err
-			return
-		}
-		dbInst, dbErr = sql.Open("duckdb", dbPath)
-		if dbErr != nil {
-			return
-		}
-		dbErr = migrate(dbInst)
-	})
-	return dbInst, dbErr
-}
-
-// OpenDB opens a DuckDB connection to the given path (for testing).
+// OpenDB opens and migrates a DuckDB connection to the given path.
 func OpenDB(path string) (*sql.DB, error) {
 	db, err := sql.Open("duckdb", path)
 	if err != nil {
@@ -45,18 +19,6 @@ func OpenDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	return db, nil
-}
-
-func dbPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("getting home directory: %w", err)
-	}
-	dir := filepath.Join(home, ".lotel", "data")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("creating data directory: %w", err)
-	}
-	return filepath.Join(dir, "lotel.db"), nil
 }
 
 const schemaVersion = 3

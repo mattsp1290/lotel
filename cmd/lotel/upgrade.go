@@ -35,6 +35,7 @@ func upgradeCommand() *cobra.Command {
 				return err
 			}
 			var restartConfig string
+			var restartBackend string
 			req := upgrade.Request{Current: version, Executable: path, BaseURL: os.Getenv("LOTEL_RELEASE_BASE_URL"), Version: target, Check: check, Force: force, SourceBuild: distribution != "release"}
 			report, err := upgradeWithCollector(cmd.Context(), req, collectorControl{
 				running: func(ctx context.Context) (bool, error) {
@@ -43,14 +44,23 @@ func upgradeCommand() *cobra.Command {
 						return false, e
 					}
 					restartConfig = s.ConfigPath
+					restartBackend = s.Backend
 					return s.Running, nil
 				},
 				stop: func(ctx context.Context) error { return runCollectorCommand(ctx, path, cmd.ErrOrStderr(), "stop") },
 				start: func(ctx context.Context) error {
-					return runCollectorCommand(ctx, path, cmd.ErrOrStderr(), "start", "--wait", "--config", restartConfig)
+					args := []string{"start", "--wait", "--config", restartConfig}
+					if restartBackend != "" {
+						args = append(args, "--backend", restartBackend)
+					}
+					return runCollectorCommand(ctx, path, cmd.ErrOrStderr(), args...)
 				},
 				recovery: func() string {
-					return fmt.Sprintf("%s start --wait --config %s", shellLiteral(path), shellLiteral(restartConfig))
+					command := fmt.Sprintf("%s start --wait --config %s", shellLiteral(path), shellLiteral(restartConfig))
+					if restartBackend != "" {
+						command += " --backend " + shellLiteral(restartBackend)
+					}
+					return command
 				},
 			}, cmd.ErrOrStderr())
 			if jsonOutput {

@@ -11,13 +11,13 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-type NativeConfig struct {
+type CollectorConfig struct {
 	YAML      []byte
 	Ingestion ingestion.Options
 }
 
-func ReadNative(path, dataPath string) (NativeConfig, error) {
-	result := NativeConfig{Ingestion: ingestion.Options{Enabled: true, Interval: 2 * time.Minute}}
+func ReadCollector(path string) (CollectorConfig, error) {
+	result := CollectorConfig{Ingestion: ingestion.Options{Enabled: true, Interval: 2 * time.Second}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return result, err
@@ -34,7 +34,7 @@ func ReadNative(path, dataPath string) (NativeConfig, error) {
 		options := struct {
 			Enabled  bool   `yaml:"enabled"`
 			Interval string `yaml:"interval"`
-		}{true, "2m"}
+		}{true, "2s"}
 		decoder := yaml.NewDecoder(strings.NewReader(string(encoded)))
 		decoder.KnownFields(true)
 		if err := decoder.Decode(&options); err != nil {
@@ -46,6 +46,19 @@ func ReadNative(path, dataPath string) (NativeConfig, error) {
 		}
 		result.Ingestion = ingestion.Options{Enabled: options.Enabled, Interval: interval}
 		delete(document, "ingestion")
+	}
+	result.YAML, err = yaml.Marshal(document)
+	return result, err
+}
+
+func ReadNative(path, dataPath string) (CollectorConfig, error) {
+	result, err := ReadCollector(path)
+	if err != nil {
+		return result, err
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(result.YAML, &document); err != nil {
+		return result, err
 	}
 	if exporters, ok := document["exporters"].(map[string]any); ok {
 		for name, value := range exporters {

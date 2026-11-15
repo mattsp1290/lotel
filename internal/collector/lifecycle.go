@@ -23,26 +23,7 @@ func Start(ctx context.Context, configPath, dataPath, backend string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if backend == "native" {
-		return startNative(ctx, configPath, dataPath)
-	}
-	state, err := readState()
-	if err != nil {
-		return err
-	}
-	if state != nil && state.Backend == "native" {
-		status, statusErr := nativeStatus(ctx, state)
-		if statusErr != nil {
-			return statusErr
-		}
-		if status.Running {
-			return errors.New("native collector is running; run 'lotel stop' before switching backend")
-		}
-		if err := stopNative(ctx, state); err != nil {
-			return err
-		}
-	}
-	return startDocker(ctx, configPath, dataPath)
+	return startRuntime(ctx, configPath, dataPath, backend)
 }
 
 func Stop(ctx context.Context) error {
@@ -55,10 +36,10 @@ func Stop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if state != nil && state.Backend == "native" {
-		return stopNative(ctx, state)
+	if state != nil && state.ControlSocket != "" {
+		return stopRuntime(ctx, state)
 	}
-	return stopDocker(ctx)
+	return errors.Join(stopDocker(ctx), removeState())
 }
 
 func lockLifecycle() (func(), error) {

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestStartEnablesProfiles(t *testing.T) {
+func TestDockerLaunchEnablesProfiles(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("PATH", tmp)
@@ -24,7 +24,7 @@ func TestStartEnablesProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	dataPath := filepath.Join(tmp, "data")
-	if err := Start(context.Background(), cfg, dataPath, "docker"); err != nil {
+	if err := startDocker(context.Background(), cfg, dataPath); err != nil {
 		t.Fatal(err)
 	}
 	args, err := os.ReadFile(argsPath)

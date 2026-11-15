@@ -120,12 +120,8 @@ func main() {
 	ingestCmd := &cobra.Command{
 		Use:   "ingest",
 		Short: "Ingest JSONL telemetry files into the query database",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
 			dataPath, err := config.DataPath()
-			if err != nil {
-				return err
-			}
-			db, err := openDB()
 			if err != nil {
 				return err
 			}
@@ -140,7 +136,7 @@ func main() {
 			}
 			printJSON(report)
 			return nil
-		},
+		}),
 	}
 
 	ingestCmd.Flags().BoolVar(&fullIngest, "full", false, "rebuild the query index from retained JSONL; previously pruned records can return")
@@ -157,11 +153,7 @@ func main() {
 	queryTracesCmd := &cobra.Command{
 		Use:   "traces",
 		Short: "Query traces (JSON output)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
+		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
 			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
@@ -175,17 +167,13 @@ func main() {
 			}
 			printJSON(results)
 			return nil
-		},
+		}),
 	}
 
 	queryMetricsCmd := &cobra.Command{
 		Use:   "metrics",
 		Short: "Query metrics (JSON output)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
+		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
 			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
@@ -199,17 +187,13 @@ func main() {
 			}
 			printJSON(results)
 			return nil
-		},
+		}),
 	}
 
 	queryLogsCmd := &cobra.Command{
 		Use:   "logs",
 		Short: "Query logs (JSON output)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
+		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
 			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
@@ -223,7 +207,7 @@ func main() {
 			}
 			printJSON(results)
 			return nil
-		},
+		}),
 	}
 
 	// --- query metrics aggregate ---
@@ -231,13 +215,9 @@ func main() {
 	queryAggCmd := &cobra.Command{
 		Use:   "aggregate",
 		Short: "Compute avg/min/max; for cumulative histograms, read the latest query metrics point",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
 			if metricName == "" {
 				return fmt.Errorf("--metric is required")
-			}
-			db, err := openDB()
-			if err != nil {
-				return err
 			}
 			opts, err := parseQueryOpts(service, since, until, 0)
 			if err != nil {
@@ -249,7 +229,7 @@ func main() {
 			}
 			printJSON(result)
 			return nil
-		},
+		}),
 	}
 	queryAggCmd.Flags().StringVar(&metricName, "metric", "", "metric name to aggregate (required)")
 
@@ -281,7 +261,7 @@ func main() {
 	pruneCmd := &cobra.Command{
 		Use:   "prune",
 		Short: "Delete telemetry data older than a threshold",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
 			if pruneAll && olderThan != "" {
 				return fmt.Errorf("--all and --older-than are mutually exclusive")
 			}
@@ -300,10 +280,6 @@ func main() {
 				cutoff = time.Now().Add(-dur)
 			}
 
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
 			prune := storage.Prune
 			if pruneAll {
 				prune = storage.PruneAll
@@ -317,14 +293,14 @@ func main() {
 			}
 			printJSON(reports)
 			return nil
-		},
+		}),
 	}
 	pruneCmd.Flags().StringVar(&olderThan, "older-than", "", "age threshold (e.g., '7d', '24h', '1h')")
 	pruneCmd.Flags().StringVar(&pruneService, "service", "", "limit pruning to a specific service")
 	pruneCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be pruned without deleting")
 	pruneCmd.Flags().BoolVar(&pruneAll, "all", false, "delete all telemetry data")
 
-	rootCmd.AddCommand(nativeRunCommand())
+	rootCmd.AddCommand(runtimeRunCommand())
 	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, pruneCmd, upgradeCommand())
 
 	ctx := context.Background()
@@ -385,28 +361,22 @@ func parseDuration(s string) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
 
-func openDB() (*sql.DB, error) {
-	dataPath, err := config.DataPath()
-	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(dataPath, 0o755); err != nil {
-		return nil, err
-	}
-	var db *sql.DB
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		db, err = storage.OpenDB(filepath.Join(dataPath, "lotel.db"))
-		if err == nil || !storage.IsDatabaseLocked(err) || time.Now().After(deadline) {
-			break
+func withDatabase(run func(*cobra.Command, []string, *sql.DB) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		dataPath, err := config.DataPath()
+		if err != nil {
+			return err
 		}
-		time.Sleep(25 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+		defer cancel()
+		return storage.WithDB(ctx, filepath.Join(dataPath, "lotel.db"), func(db *sql.DB) error {
+			if storage.SchemaRebuilt {
+				fmt.Fprintln(os.Stderr, "lotel: database index rebuilt; run 'lotel ingest' to reload raw telemetry")
+				storage.SchemaRebuilt = false
+			}
+			return run(cmd, args, db)
+		})
 	}
-	if err == nil && storage.SchemaRebuilt {
-		fmt.Fprintln(os.Stderr, "lotel: database index rebuilt; run 'lotel ingest' to reload raw telemetry")
-		storage.SchemaRebuilt = false
-	}
-	return db, err
 }
 
 func parseAttrFlags(flags []string) ([]storage.AttrFilter, error) {
