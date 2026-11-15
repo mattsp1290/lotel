@@ -32,6 +32,8 @@ func TestQueryCommandsWaitForIngestionAndReleaseDatabase(t *testing.T) {
 		{"query", "trace", traceID, "--relationships"},
 		{"query", "traces", "--errors-only"},
 		{"query", "logs", "--min-severity", "error"},
+		{"query", "recent", "traces", "--since", at, "--until", at, "--limit", "1"},
+		{"query", "recent", "logs", "--since", at, "--until", at, "--limit", "1"},
 		{"assert", "signal", "--signal", "logs", "--service", "locked-query", "--since", at, "--until", at},
 	}
 	type result struct {

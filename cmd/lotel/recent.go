@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -74,23 +75,20 @@ func recentCommand() *cobra.Command {
 					}
 					duration = &d
 				}
-				db, err := openDB()
-				if err != nil {
-					return err
-				}
-				defer db.Close()
-				var records any
-				var truncated bool
-				if signal == "traces" {
-					errorsOnly, _ := cmd.Flags().GetBool("errors-only")
-					records, truncated, err = storage.RecentTraces(db, storage.TraceQueryOptions{QueryOptions: opts, ErrorsOnly: errorsOnly, MinDuration: duration})
-				} else {
-					records, truncated, err = storage.RecentLogs(db, storage.LogQueryOptions{QueryOptions: opts, MinSeverity: severity, BodyContains: body})
-				}
-				if err != nil {
-					return err
-				}
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(recentResult{Signal: signal, Since: start, Until: end, Records: records, Truncated: truncated})
+				return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+					var records any
+					var truncated bool
+					if signal == "traces" {
+						errorsOnly, _ := cmd.Flags().GetBool("errors-only")
+						records, truncated, err = storage.RecentTraces(db, storage.TraceQueryOptions{QueryOptions: opts, ErrorsOnly: errorsOnly, MinDuration: duration})
+					} else {
+						records, truncated, err = storage.RecentLogs(db, storage.LogQueryOptions{QueryOptions: opts, MinSeverity: severity, BodyContains: body})
+					}
+					if err != nil {
+						return err
+					}
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(recentResult{Signal: signal, Since: start, Until: end, Records: records, Truncated: truncated})
+				})(cmd, args)
 			},
 		}
 		cmd.Flags().StringVar(&service, "service", "", "filter by service.name")
