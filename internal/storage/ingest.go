@@ -18,18 +18,21 @@ type IngestReport struct {
 	Signals map[string]*SignalReport `json:"signals"`
 }
 type SignalReport struct {
-	Files          int   `json:"files"`
-	Lines          int   `json:"lines"`
-	Records        int   `json:"records"`
-	SkippedLines   int   `json:"skipped_lines"`
-	SkippedRecords int   `json:"skipped_records"`
-	Bytes          int64 `json:"bytes"`
+	Files                  int   `json:"files"`
+	Lines                  int   `json:"lines"`
+	Records                int   `json:"records"`
+	SkippedLines           int   `json:"skipped_lines"`
+	SkippedRecords         int   `json:"skipped_records"`
+	Bytes                  int64 `json:"bytes"`
+	OTLPEnvelopes          int   `json:"otlp_envelopes"`
+	ProjectionSkippedLines int   `json:"projection_skipped_lines"`
 }
 
 // IngestAll incrementally ingests complete JSONL lines in per-file transactions.
 func IngestAll(db *sql.DB, dataPath string) (*IngestReport, error) {
 	report := &IngestReport{Signals: map[string]*SignalReport{}}
-	for _, signal := range []string{"traces", "metrics", "logs"} {
+	for _, descriptor := range otlpSignals {
+		signal := descriptor.name
 		rep := &SignalReport{}
 		report.Signals[signal] = rep
 		path, err := filepath.Abs(filepath.Join(dataPath, signal, signal+".jsonl"))
@@ -71,10 +74,10 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 		return err
 	}
 	defer tx.Rollback()
-	var offset int64
+	var offset, rawOffset int64
 	var previous string
 	var previousLen int
-	err = tx.QueryRow("SELECT byte_offset,fingerprint,fingerprint_len FROM ingest_state WHERE path=?", path).Scan(&offset, &previous, &previousLen)
+	err = tx.QueryRow("SELECT byte_offset,fingerprint,fingerprint_len,raw_byte_offset FROM ingest_state WHERE path=?", path).Scan(&offset, &previous, &previousLen, &rawOffset)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
@@ -82,14 +85,14 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 		offset = 0
 	} else {
 		if offset > stat.Size() || int64(previousLen) > stat.Size() {
-			offset = 0
+			offset, rawOffset = 0, 0
 		} else {
 			fingerprint, err := fileFingerprint(f, previousLen)
 			if err != nil {
 				return err
 			}
 			if fingerprint != previous {
-				offset = 0
+				offset, rawOffset = 0, 0
 			}
 		}
 	}
@@ -98,19 +101,23 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 	if err != nil {
 		return err
 	}
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+	readOffset := min(offset, rawOffset)
+	if _, err := f.Seek(readOffset, io.SeekStart); err != nil {
 		return err
 	}
 	reader := bufio.NewReaderSize(f, 1<<20)
 	rep.Files++
-	stmt, err := tx.Prepare(ingestStatements[signal])
-	if err != nil {
-		return err
+	var stmt *sql.Stmt
+	if statement, ok := ingestStatements[signal]; ok {
+		stmt, err = tx.Prepare(statement)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
 	}
-	defer stmt.Close()
 	var consumed int64
 	// Restrict this transaction to the file size observed above.
-	remaining := stat.Size() - offset
+	remaining := stat.Size() - readOffset
 	for remaining > 0 {
 		line, err := reader.ReadBytes('\n')
 		if err == io.EOF {
@@ -125,10 +132,25 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 		consumed += int64(len(line))
 		remaining -= int64(len(line))
 		rep.Lines++
-		var envelope map[string]json.RawMessage
-		root := map[string]string{"traces": "resourceSpans", "metrics": "resourceMetrics", "logs": "resourceLogs"}[signal]
-		if json.Unmarshal(line, &envelope) != nil || envelope[root] == nil {
+		envelopes, parseErr := splitOTLPEnvelopes(signal, line)
+		if parseErr != nil {
 			rep.SkippedLines++
+			continue
+		}
+		lineEnd := readOffset + consumed
+		if lineEnd > rawOffset {
+			for _, envelope := range envelopes {
+				if _, err := tx.Exec(`INSERT INTO otlp_envelopes VALUES (?,?,CAST(? AS UBIGINT),CAST(? AS UBIGINT),?)`, signal, envelope.ServiceName, nullableNano(envelope.FirstTimeUnixNano), nullableNano(envelope.LastTimeUnixNano), string(envelope.Payload)); err != nil {
+					return fmt.Errorf("inserting OTLP envelope: %w", err)
+				}
+				rep.OTLPEnvelopes++
+			}
+		}
+		if lineEnd <= offset {
+			continue
+		}
+		if signal == "profiles" {
+			rep.Records += countProfileRecords(envelopes)
 			continue
 		}
 		var records, skipped int
@@ -145,12 +167,12 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 		}
 		rep.Records += records
 		if skipped < 0 {
-			rep.SkippedLines++
+			rep.ProjectionSkippedLines++
 		} else {
 			rep.SkippedRecords += skipped
 		}
 	}
-	_, err = tx.Exec("INSERT INTO ingest_state VALUES (?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(path) DO UPDATE SET byte_offset=excluded.byte_offset,fingerprint=excluded.fingerprint,fingerprint_len=excluded.fingerprint_len,updated_at=excluded.updated_at", path, offset+consumed, fingerprint, length)
+	_, err = tx.Exec("INSERT INTO ingest_state (path,byte_offset,fingerprint,fingerprint_len,updated_at,raw_byte_offset) VALUES (?,?,?,?,CURRENT_TIMESTAMP,?) ON CONFLICT(path) DO UPDATE SET byte_offset=excluded.byte_offset,fingerprint=excluded.fingerprint,fingerprint_len=excluded.fingerprint_len,updated_at=excluded.updated_at,raw_byte_offset=excluded.raw_byte_offset", path, readOffset+consumed, fingerprint, length, readOffset+consumed)
 	if err != nil {
 		return err
 	}

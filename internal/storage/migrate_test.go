@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestMigrate_FreshCreatesV2(t *testing.T) {
+func TestMigrate_FreshCreatesV3(t *testing.T) {
 	db, err := OpenDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -17,7 +17,7 @@ func TestMigrate_FreshCreatesV2(t *testing.T) {
 		t.Fatal("fresh database reported rebuild")
 	}
 	var version string
-	if err := db.QueryRow("SELECT value FROM schema_meta WHERE key='schema_version'").Scan(&version); err != nil || version != "2" {
+	if err := db.QueryRow("SELECT value FROM schema_meta WHERE key='schema_version'").Scan(&version); err != nil || version != "3" {
 		t.Fatalf("version %q: %v", version, err)
 	}
 	_, err = db.Exec(`INSERT INTO metrics(metric_name,metric_type,timestamp,service_name,date,"count","sum","min","max") VALUES ('tokens','histogram',CURRENT_TIMESTAMP,'test',CURRENT_DATE,3,6,1,3)`)
@@ -64,7 +64,7 @@ func TestMigrate_RejectsNewer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("UPDATE schema_meta SET value='3'"); err != nil {
+	if _, err := db.Exec("UPDATE schema_meta SET value='4'"); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
