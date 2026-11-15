@@ -279,7 +279,11 @@ leave history incomplete, including missing resets or missing-value markers.
 Complete OTLP history may require a full backfill from retained raw files.
 The selector is limited to 4 MiB. The scan stops with an indeterminate error
 after 100,000 envelopes, 4 MiB in one envelope, 64 MiB of
-envelope data, 100,000 matching points, or 128 MiB of candidate processing.
+envelope data, 100,000 points across all streams, or one million JSON tokens.
+Every retained metrics envelope must decode completely. Unknown or malformed
+protobuf fields, malformed attributes, and unsupported enum values or resource
+entity references anywhere make the result indeterminate, even in unrelated
+streams. This does not validate every semantic rule for unrelated metric values.
 
 ## Query options
 

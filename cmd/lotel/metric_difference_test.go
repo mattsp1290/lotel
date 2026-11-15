@@ -271,12 +271,13 @@ func TestMetricDifferenceCLISeparatesDisjointAndAmbiguousResources(t *testing.T)
 	}
 	incomplete := strings.Replace(differenceData, `"resource":{"attributes":`, `"resource":{"droppedAttributesCount":1,"attributes":`, 1)
 	other := strings.Replace(incomplete, `"stringValue":"cli-test"`, `"stringValue":"other"`, 1)
-	other = strings.Replace(other, `"name":"requests"`, `"name":"requests","newField":42`, 1)
+	unknown := strings.Replace(other, `"name":"requests"`, `"name":"requests","newField":42`, 1)
 	for _, tc := range []struct {
 		name, candidate string
 		wantSuccess     bool
 	}{
-		{"disjoint incomplete resource and unknown metric", other, true},
+		{"disjoint incomplete resource", other, true},
+		{"unknown metric in disjoint resource", unknown, false},
 		{"possibly matching incomplete resource", incomplete, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
