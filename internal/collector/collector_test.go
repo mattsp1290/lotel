@@ -69,6 +69,23 @@ func TestIsContainerRunning_NoDocker(t *testing.T) {
 	}
 }
 
+func TestStatusPreservesLifecycleState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	state := &State{ContainerName: "lotel-collector", ContainerID: "previous-container"}
+	if err := writeState(state); err != nil {
+		t.Fatal(err)
+	}
+	status, err := GetStatus(t.Context())
+	if err != nil || status.Running {
+		t.Fatalf("status: %+v, %v", status, err)
+	}
+	saved, err := readState()
+	if err != nil || saved == nil || saved.ContainerID != state.ContainerID {
+		t.Fatalf("status changed lifecycle state: %+v, %v", saved, err)
+	}
+}
+
 func TestCheckHealth_NoServer(t *testing.T) {
 	// Exercise an unreachable endpoint independently of the local collector.
 	old := healthURL
