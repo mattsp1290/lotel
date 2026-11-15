@@ -118,3 +118,46 @@ func TestTraceCommandRejectsInvalidIDs(t *testing.T) {
 		t.Fatalf("invalid arguments opened database: %v", err)
 	}
 }
+
+func TestTraceCommandMatchesIngestedMixedCaseIDs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dataPath := filepath.Join(home, ".lotel", "data")
+	files := map[string]string{
+		"traces": `{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"mixed-case"}}]},"scopeSpans":[{"spans":[{"traceId":"ABCDEF0123456789ABCDEF0123456789","spanId":"1111111111111111","name":"request","startTimeUnixNano":"1700000000000000000","endTimeUnixNano":"1700000001000000000"}]}]}]}` + "\n",
+		"logs":   `{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"mixed-case"}}]},"scopeLogs":[{"logRecords":[{"traceId":"abcdef0123456789abcdef0123456789","spanId":"1111111111111111","timeUnixNano":"1700000000000000000","body":{"stringValue":"linked"}},{"traceId":"ABCDEF0123456789ABCDEF0123456789","spanId":"1111111111111111","timeUnixNano":"1700000000000000001","body":{"stringValue":"uppercase"}}]}]}]}` + "\n",
+	}
+	for signal, data := range files {
+		dir := filepath.Join(dataPath, signal)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, signal+".jsonl"), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := storage.OpenDB(filepath.Join(dataPath, "lotel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.IngestAll(db, dataPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	cmd := traceCommand()
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"aBcDeF0123456789ABCDEF0123456789"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var result traceBundle
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Spans) != 1 || len(result.Logs) != 2 {
+		t.Fatalf("missing ingested span or log: %s", out.String())
+	}
+}

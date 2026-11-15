@@ -362,7 +362,7 @@ func buildFilters(query *string, opts QueryOptions, nameColumn string) []any {
 		args = append(args, opts.Name)
 	}
 	if opts.TraceID != "" {
-		*query += " AND trace_id = ?"
+		*query += " AND lower(trace_id) = ?"
 		args = append(args, strings.ToLower(opts.TraceID))
 	}
 	if opts.EventName != "" {
