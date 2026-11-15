@@ -1,38 +1,200 @@
-# lotel — Local OpenTelemetry
+# lotel
 
-A CLI tool for local OpenTelemetry telemetry collection, querying, and management. Runs the OTel Collector as a Docker container and stores telemetry in DuckDB for fast querying.
+Collect and query OpenTelemetry on your machine. Lotel runs the OTel Collector
+in Docker and indexes its JSONL files in DuckDB. Queries return JSON for coding
+agents and scripts.
 
-## Scope
+`lotel` gives a coding agent local traces, metrics, and logs to check an
+application while it runs. The default Collector writes telemetry to your
+machine. You do not need a hosted telemetry account, an API key, or a paid
+telemetry backend.
 
-`lotel` is designed for **one developer machine / one host** while building and debugging software locally. It is intentionally not a distributed telemetry backend and is not meant to replace production observability stacks. Its goal is to provide local development with a coding agent a full loop that lets you replicate the observability experience you'd have of a deployed service. Your agent has probably always had access to logs. But adding in traces lets them start debugging things like call length or answer questions like "Are we actually making API calls here?".
+It is for one developer machine. Use your production observability system for
+shared or deployed environments. Model calls made by your application or coding
+agent can still cost money. If an agent reads query output, its model provider
+may receive that output under the agent's own data policy.
 
-## Quick Start
+## Install and upgrade
+
+The release installer becomes available after the first release is published.
+Until then, [build from source](#build-from-source).
+
+To install a published binary on Linux or macOS, on x86_64 or arm64:
 
 ```bash
-# Ensure Docker is installed and running
-# See: https://docs.docker.com/get-docker/
+curl -fsSL https://github.com/mattsp1290/lotel/releases/latest/download/install.sh | sh
+```
 
-# Build lotel
-go build -o lotel ./cmd/lotel
+The installer verifies the release manifest, SHA-256 checksum, and executable
+version before replacing `~/.local/bin/lotel`. It needs `curl`, `awk`, `sed`,
+and one of `sha256sum`, `shasum`, or `openssl`. It does not use `sudo` or change your shell
+profile. If the install directory is not on your `PATH`, add it:
 
-# Start the collector
-./lotel start --wait
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+lotel --version
+```
 
-# Send telemetry to localhost:4317 (gRPC) or localhost:4318 (HTTP)
-# Then ingest and query:
-./lotel ingest
-./lotel query traces --service my-app
-./lotel query metrics --service my-app
-./lotel query logs --service my-app
-./lotel query profiles --service my-app
-./lotel query otlp --signal metrics --service my-app
+Set `LOTEL_INSTALL_DIR` to choose another directory or
+`LOTEL_INSTALL_VERSION=vX.Y.Z` to pin a release. Set these variables for `sh`
+when you pipe the installer:
+
+```bash
+curl -fsSL https://github.com/mattsp1290/lotel/releases/latest/download/install.sh | \
+  LOTEL_INSTALL_DIR="$HOME/bin" LOTEL_INSTALL_VERSION=vX.Y.Z sh
+```
+
+Update an installed binary:
+
+```bash
+lotel upgrade --check
+lotel upgrade --check --json
+lotel upgrade
+lotel health
+```
+
+To pin or roll back, run `lotel upgrade --version vX.Y.Z`. Replace `vX.Y.Z`
+with a published release tag. Upgrades verify the download before replacing
+the executable in place.
+
+Before replacement, `upgrade` warns on stderr that OpenTelemetry collection
+will be unavailable. Agents must retain stderr even when they request `--json`.
+It stops a running Collector, replaces the executable, then uses the new
+executable to restart the Collector with its recorded configuration and wait for
+health. An upgrade can therefore apply new Collector versions and defaults.
+Telemetry emitted during that gap can be lost unless your application buffers
+or retries it. An initially stopped Collector stays stopped. `--check` and upgrades that need no replacement
+do not interrupt collection. If Docker cannot report the Collector state,
+the upgrade aborts before replacement and preserves the recorded state.
+
+If an upgrade fails after the stop, it attempts to restart collection and reports
+any recovery failure. Use the recovery command printed by `upgrade`, including
+its recorded `--config` path, then run `lotel health`. Resume telemetry checks
+only after the Collector is healthy.
+Upgrading the executable preserves the local telemetry files. The Collector may
+refresh its managed configuration when it starts.
+
+Source builds require `--force` before a binary upgrade can replace them.
+Normally, rebuild and reinstall those from source instead. Use `lotel upgrade`
+for installed releases so it can manage the collection interruption.
+See [the release contract](docs/release.md) for supported systems, mirrors,
+upgrade safeguards, and release publishing.
+
+## Quick start
+
+Install and start Docker before you start the Collector.
+
+```bash
+lotel start --wait
+lotel health
+```
+
+Configure your application's OpenTelemetry SDK to send OTLP to
+`localhost:4317` for gRPC or `http://localhost:4318` for HTTP. After the app
+emits telemetry, ingest it and query the service name that your app uses:
+
+```bash
+lotel ingest
+lotel query traces --service my-app --since 10m
+lotel query metrics --service my-app --since 10m
+lotel query logs --service my-app --since 10m
+lotel query profiles --service my-app --since 10m
+lotel query otlp --signal metrics --service my-app --since 10m
+```
+
+An empty JSON array means no matching records were found. It is not proof that
+the application worked. Check the service name, SDK exporters, sampling, and
+export interval, then ingest again after the SDK and Collector flush.
+
+## Verify an application with a coding agent
+
+Suppose your app has a checkout endpoint that reads a database and calls a
+payment API. Ask your agent to verify the behavior using telemetry, then repeat
+the same request after each fix. A local fake payment service keeps the example
+independent of paid APIs.
+
+First, instrument the application with its language's OpenTelemetry SDK and
+OTLP exporters. Add spans around the checkout, database query, and payment
+request. Export a request-duration metric and logs with trace IDs. Lotel collects
+what the application emits. It does not add application instrumentation.
+
+For an SDK that supports the standard environment variables, run the app with:
+
+```bash
+export OTEL_SERVICE_NAME=checkout-dev
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_TRACES_EXPORTER=otlp
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_LOGS_EXPORTER=otlp
+```
+
+Use these settings in the shell that starts your application or test process.
+They configure an installed SDK and exporters. They do not install them.
+Remove any vendor exporters or signal-specific endpoint overrides that still
+send telemetry elsewhere. See the [OTLP exporter settings](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/)
+for SDK support and per-signal configuration.
+
+Give your agent a concrete task such as:
+
+> Start lotel and check its health. Run the checkout success and failed-payment
+> tests with service.name=checkout-dev against the local fake payment service.
+> Wait for telemetry to flush, then ingest it. Query only this test window.
+> Confirm that the checkout span has database and payment child spans, that the
+> duration metric has fresh points, and that a failed payment has an error span
+> and a useful log with the same trace ID. Treat missing telemetry as a failed
+> check. If a check fails, fix the application or its instrumentation, rerun the
+> same cases, and compare the new telemetry. Report the commands, trace IDs,
+> observed values, and any gaps. Keep the Collector running.
+
+The agent can use these commands after the test run:
+
+```bash
+lotel ingest
+lotel query traces --service checkout-dev --since 10m --limit 100
+lotel query metrics --service checkout-dev --since 10m --limit 100
+lotel query logs --service checkout-dev --since 10m --limit 100
+```
+
+For example, the agent can check that each child span's `parent_span_id` points
+to the checkout span's `span_id`. It can then correlate an error with
+`lotel query logs --trace-id <trace-id> --since 10m`. Replace `<trace-id>` with
+an actual value from the trace query.
+
+Capture a start time before the tests and an end time after the SDK and
+Collector flush and the expected metric points appear. Use those times with
+`--since` and `--until` when you compare runs. Both accept RFC3339 timestamps.
+Use a unique service name per run if the same app also runs in another terminal.
+A ten-minute window is convenient for exploration but can mix results from before and after a fix. Successful
+queries exit 0 even when empty, so the agent must inspect the records and
+compare them against the expected spans, metrics, and logs.
+
+The feedback loop is **run, ingest, inspect, fix, rerun**. Local query results
+let the agent check whether a code change altered the real execution path.
+They can also expose missing instrumentation before the change reaches
+production. Review sensitive fields before giving query output to a remote
+agent. The [content redaction examples](#genai) cover LLM message content.
+
+## Build from source
+
+Building requires Make, Go 1.24.4 or later, CGO enabled, and a C/C++ toolchain
+for DuckDB. Running the Collector requires Docker.
+
+```bash
+git clone https://github.com/mattsp1290/lotel.git
+cd lotel
+make install
+export PATH="$HOME/.local/bin:$PATH"
+lotel --version
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `lotel start [--wait]` | Start the OTel Collector container |
+| `lotel --version` | Show the executable version |
+| `lotel upgrade [--check] [--json] [--version vX.Y.Z]` | Check for or install a release |
+| `lotel start [--wait] [--config <path>]` | Start the OTel Collector container |
 | `lotel stop` | Stop the collector |
 | `lotel status` | Show collector status (JSON) |
 | `lotel health` | Check collector health (exit 0/1) |
@@ -47,7 +209,7 @@ go build -o lotel ./cmd/lotel
 | `lotel query aggregate` | Compute avg/min/max for a metric |
 | `lotel prune` | Delete telemetry older than threshold |
 
-## Query Options
+## Query options
 
 All query commands support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`:
 
@@ -128,22 +290,13 @@ lotel prune --older-than 7d --dry-run
 lotel prune --older-than 7d
 ```
 
-## Output Contract
+## Output contract
 
 All query commands output JSON to stdout. Exit codes:
 - `0`: success
 - `1`: error or unhealthy status
 
 This makes lotel suitable for scripted and agent-driven workflows.
-
-### AI Coding Agent Workflows
-
-`lotel` works well with AI coding agents (like Cursor agents, Claude Code, or similar tools) because commands are local, deterministic, and JSON-first. An agent can:
-
-- start and health-check telemetry collection before running app/tests
-- ingest newly produced telemetry artifacts after test runs
-- query traces/metrics/logs with filters (`--service`, `--since`) to validate behavior
-- use non-zero exit codes to fail fast in automation loops
 
 ## Architecture
 
@@ -155,7 +308,7 @@ Application → OTLP (gRPC :4317 / HTTP :4318)
                 → lotel query → JSON output
 ```
 
-## Data Storage
+## Data storage
 
 - **Raw**: JSONL files written by the collector to `~/.lotel/data/{traces,metrics,logs,profiles}/`
 - **Indexed**: DuckDB database at `~/.lotel/data/lotel.db` (populated by `lotel ingest`)
@@ -181,9 +334,13 @@ a rebuild because prune leaves the raw JSONL files intact.
 
 ## Configuration
 
-lotel looks for collector config in this order:
+Without `start --config <path>`, lotel looks for Collector config in this order:
 1. `./lotel-collector.yaml` (project-local)
 2. `~/.lotel/collector-config.yaml` (auto-generated default)
+
+`start --config <path>` selects an explicit configuration file. Upgrades
+preserve the running Collector's recorded config path, even when the command
+runs from another directory.
 
 The collector image is pinned to `otel/opentelemetry-collector-contrib:0.165.0`.
 The default config provides OTLP receivers, GenAI normalization, spanmetrics,
@@ -231,11 +388,11 @@ opentelemetry-instrument python my_app.py
 After your app makes calls, ingest and query:
 
 ```bash
-./lotel ingest
-./lotel query genai calls --service my-llm-app --since 10m
-./lotel query genai calls --service my-llm-app --since 10m --content
-./lotel query genai usage --service my-llm-app --group-by provider,model
-./lotel query logs --event-name gen_ai.client.inference.operation.details --since 10m
+lotel ingest
+lotel query genai calls --service my-llm-app --since 10m
+lotel query genai calls --service my-llm-app --since 10m --content
+lotel query genai usage --service my-llm-app --group-by provider,model
+lotel query logs --event-name gen_ai.client.inference.operation.details --since 10m
 ```
 
 A call includes these fields, among others:
@@ -254,8 +411,8 @@ To remove or hash content, copy
 `./lotel-collector.yaml`, then run:
 
 ```bash
-./lotel stop
-./lotel start --wait
+lotel stop
+lotel start --wait
 ```
 
 These recipes process span attributes, span events, log attributes, and structured
@@ -317,11 +474,13 @@ This project uses `bn` (Beans), with issues stored in the shared hub at
 `~/.beans/hub`. Run `bn prime` for the agent workflow or `bn ready` for available
 work. See [issue tracking setup and migration](docs/issue-tracking.md).
 
-## Requirements
+## Runtime requirements
 
-- Go 1.24+
-- Docker
-- CGO enabled (for DuckDB)
+- Docker installed and running.
+- A supported Linux or macOS host. See [release platform requirements](docs/release.md).
+
+Prebuilt installations do not require Go or a compiler. Source builds need the
+[build requirements](#build-from-source).
 
 ## License
 
