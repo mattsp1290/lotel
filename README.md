@@ -239,6 +239,7 @@ Additional filters:
 | `--name` | `traces` (span name), `metrics` (metric name) |
 | `--trace-id` | `traces`, `logs`, `genai calls`, `genai usage` |
 | `--errors-only`, `--min-duration` | `traces` |
+| `--min-severity`, `--body-contains` | `logs` |
 | `--event-name` | `logs` |
 | `--attr key=value` | `traces`, `metrics`, `logs`; repeat to require all matches |
 | `--model`, `--provider`, `--operation`, `--conversation-id`, `--errors-only` | Both GenAI commands |
@@ -255,6 +256,13 @@ not infer errors from HTTP status or exceptions. `--min-duration` accepts a
 nonnegative Go duration such as `100ms` and includes spans at the threshold.
 It compares the projected nanosecond duration. Spans with missing timestamps
 have a projected duration of zero.
+
+For logs, `--min-severity` accepts `trace`, `debug`, `info`, `warn`, `error`,
+or `fatal`. It compares the OpenTelemetry severity number and excludes
+unspecified and out-of-range values. `--body-contains` performs a literal,
+case-insensitive substring match on the projected body text. Structured bodies
+are represented as JSON text, so keys and JSON syntax can match. This is not a
+typed field search. The substring must not be empty.
 
 Generic queries order oldest first. `genai calls` orders newest first.
 Usage defaults to grouping by provider, model, and operation. It reports token

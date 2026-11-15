@@ -216,15 +216,33 @@ func main() {
 		Use:   "logs",
 		Short: "Query logs (JSON output)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
 			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
 			}
-			results, err := storage.QueryLogs(db, opts)
+			logOpts := storage.LogQueryOptions{QueryOptions: opts}
+			if cmd.Flags().Changed("min-severity") {
+				severity, _ := cmd.Flags().GetString("min-severity")
+				levels := map[string]int{"trace": 1, "debug": 5, "info": 9, "warn": 13, "error": 17, "fatal": 21}
+				var ok bool
+				logOpts.MinSeverity, ok = levels[severity]
+				if !ok {
+					return fmt.Errorf("invalid --min-severity %q: use trace, debug, info, warn, error, or fatal", severity)
+				}
+			}
+			if cmd.Flags().Changed("body-contains") {
+				body, _ := cmd.Flags().GetString("body-contains")
+				if body == "" {
+					return fmt.Errorf("--body-contains cannot be empty")
+				}
+				logOpts.BodyContains = &body
+			}
+			db, err := openDB()
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			results, err := storage.QueryLogs(db, logOpts)
 			if err != nil {
 				return err
 			}
@@ -280,6 +298,8 @@ func main() {
 		cmd.Flags().String("trace-id", "", "trace ID (lowercase hex)")
 	}
 	queryLogsCmd.Flags().String("event-name", "", "exact log event name")
+	queryLogsCmd.Flags().String("min-severity", "", "minimum severity: trace, debug, info, warn, error, fatal")
+	queryLogsCmd.Flags().String("body-contains", "", "case-insensitive literal substring in projected log body")
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd, queryLogsCmd} {
 		cmd.Flags().StringArray("attr", nil, "attribute key=value; repeat for AND; matches compact JSON string form, null never matches")
 	}

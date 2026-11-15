@@ -59,7 +59,7 @@ func TestIngestAndQueryRoundtrip(t *testing.T) {
 	}
 
 	// Verify logs.
-	logs, err := QueryLogs(db, QueryOptions{Service: "test-uuid-svc"})
+	logs, err := QueryLogs(db, LogQueryOptions{QueryOptions: QueryOptions{Service: "test-uuid-svc"}})
 	if err != nil {
 		t.Fatalf("QueryLogs: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestIngestAndQueryRoundtrip(t *testing.T) {
 	// Verify deletion.
 	tracesPost, _ := QueryTraces(db, TraceQueryOptions{})
 	metricsPost, _ := QueryMetrics(db, QueryOptions{})
-	logsPost, _ := QueryLogs(db, QueryOptions{})
+	logsPost, _ := QueryLogs(db, LogQueryOptions{QueryOptions: QueryOptions{}})
 	if len(tracesPost) != 0 || len(metricsPost) != 0 || len(logsPost) != 0 {
 		t.Errorf("after prune: traces=%d, metrics=%d, logs=%d; want all 0", len(tracesPost), len(metricsPost), len(logsPost))
 	}

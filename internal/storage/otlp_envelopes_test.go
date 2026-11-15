@@ -283,7 +283,7 @@ func TestOTLPV2UpgradePreservesDataAndPruneHistory(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("new raw data absent %v %+v", err, rows)
 	}
-	logs, err := QueryLogs(db, QueryOptions{})
+	logs, err := QueryLogs(db, LogQueryOptions{QueryOptions: QueryOptions{}})
 	if err != nil || len(logs) != 1 || logs[0].Body != "new" {
 		t.Fatalf("projection prune history lost %v %+v", err, logs)
 	}
@@ -333,7 +333,7 @@ func TestOTLPV3UnusedCursorColumnDoesNotReplay(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("legacy schema changed ingestion %v %+v", err, rows)
 	}
-	logs, err := QueryLogs(db, QueryOptions{})
+	logs, err := QueryLogs(db, LogQueryOptions{QueryOptions: QueryOptions{}})
 	if err != nil || len(logs) != 2 {
 		t.Fatalf("legacy schema changed projections %v %+v", err, logs)
 	}

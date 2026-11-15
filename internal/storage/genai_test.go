@@ -66,7 +66,7 @@ func TestQueryFilters(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("attribute filters: %d", len(rows))
 	}
-	logs, err := QueryLogs(db, QueryOptions{EventName: "missing"})
+	logs, err := QueryLogs(db, LogQueryOptions{QueryOptions: QueryOptions{EventName: "missing"}})
 	if err != nil || len(logs) != 0 {
 		t.Fatalf("event filter: %v", err)
 	}

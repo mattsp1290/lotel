@@ -52,7 +52,7 @@ func TestIngestGenAIFixtures(t *testing.T) {
 	if _, ok := traces[1].Attributes["gen_ai.output.messages"].([]any); !ok {
 		t.Fatal("structured content lost")
 	}
-	logs, err := QueryLogs(db, QueryOptions{})
+	logs, err := QueryLogs(db, LogQueryOptions{QueryOptions: QueryOptions{}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -232,7 +232,7 @@ func TestIngestLogs(t *testing.T) {
 		t.Fatalf("IngestAll: %v", err)
 	}
 
-	results, err := QueryLogs(db, QueryOptions{Service: "my-app"})
+	results, err := QueryLogs(db, LogQueryOptions{QueryOptions: QueryOptions{Service: "my-app"}})
 	if err != nil {
 		t.Fatalf("QueryLogs: %v", err)
 	}

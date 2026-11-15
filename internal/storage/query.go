@@ -30,6 +30,12 @@ type TraceQueryOptions struct {
 	MinDuration *time.Duration
 }
 
+type LogQueryOptions struct {
+	QueryOptions
+	MinSeverity  int
+	BodyContains *string
+}
+
 type queryer interface {
 	Query(string, ...any) (*sql.Rows, error)
 }
@@ -227,13 +233,27 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 }
 
 // QueryLogs returns logs matching the given options.
-func QueryLogs(db queryer, opts QueryOptions) ([]LogResult, error) {
-	if err := validateQueryOptions(opts); err != nil {
+func QueryLogs(db queryer, opts LogQueryOptions) ([]LogResult, error) {
+	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
+	if opts.MinSeverity != 0 && opts.MinSeverity != 1 && opts.MinSeverity != 5 && opts.MinSeverity != 9 && opts.MinSeverity != 13 && opts.MinSeverity != 17 && opts.MinSeverity != 21 {
+		return nil, fmt.Errorf("invalid minimum severity")
+	}
+	if opts.BodyContains != nil && *opts.BodyContains == "" {
+		return nil, fmt.Errorf("body search cannot be empty")
+	}
 	query := `SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR), CAST(json_object('observed_timestamp',strftime("observed_timestamp", '%Y-%m-%dT%H:%M:%S.%fZ'),'event_name',"event_name",'body_value',body_json,'flags',"flags",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version") AS VARCHAR) FROM logs WHERE 1=1`
-	args := buildWhere(&query, opts, "timestamp")
-	args = append(args, buildFilters(&query, opts, "")...)
+	args := buildWhere(&query, opts.QueryOptions, "timestamp")
+	args = append(args, buildFilters(&query, opts.QueryOptions, "")...)
+	if opts.MinSeverity != 0 {
+		query += " AND severity_number BETWEEN ? AND 24"
+		args = append(args, opts.MinSeverity)
+	}
+	if opts.BodyContains != nil {
+		query += " AND contains(lower(body), lower(?))"
+		args = append(args, *opts.BodyContains)
+	}
 
 	query += " ORDER BY timestamp ASC"
 	if opts.Limit > 0 {
