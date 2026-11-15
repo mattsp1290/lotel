@@ -209,6 +209,7 @@ lotel --version
 | `lotel query log-stats` | Summarize observed logs by service and severity |
 | `lotel query services` | List observed services and their signals |
 | `lotel query operations` | List observed span names and kinds |
+| `lotel query dependencies` | Summarize observed client-to-server service relationships |
 | `lotel query trace <trace-id>` | Query a trace and its correlated logs (JSON output) |
 | `lotel query metrics` | Query metrics (JSON output) |
 | `lotel query logs` | Query logs (JSON output) |
@@ -246,7 +247,7 @@ status. Historical assertions do not require a running Collector.
 
 ## Query options
 
-All query commands except `query trace` support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`:
+Query commands accept different filters. Most support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`. The single-trace query has no time or service filters, and dependency discovery accepts only `--since` and `--until`:
 
 ```
 --service     Filter by service.name
@@ -260,6 +261,21 @@ It does not include profile-only services or establish whether a service is runn
 Operation discovery lists distinct projected span names and kinds by service. Both
 commands filter the observation window before grouping and apply the limit after
 sorting. Missing service names appear as `unknown`; empty names remain empty.
+
+`lotel query dependencies --since 15m` reports observed cross-service edges
+from a CLIENT span to its direct SERVER child. The child's projected start time
+selects the window at microsecond precision. The parent and uniqueness checks
+use all retained spans, including spans outside the window. The start is required;
+the inclusive end defaults to now and cannot be in the future. Edges count unique
+child span identities. Duplicate trace/span identities are excluded rather than
+guessed. The `exclusions` counts categorize each excluded SERVER record once, in
+the order shown in the JSON. Duplicate child records count individually there.
+Missing or invalid IDs, missing parents, ambiguous identities, unknown services,
+non-client parents, and same-service pairs are excluded. An `unknown` service
+can be either a real name or the ingestion fallback, so both are excluded.
+Sampling, missing instrumentation, retention, and ingestion delays can hide
+edges. Messaging spans and span links are not represented. This report is not a
+complete topology or a request-volume estimate.
 
 Additional filters:
 
