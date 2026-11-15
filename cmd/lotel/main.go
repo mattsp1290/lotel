@@ -355,8 +355,11 @@ func main() {
 	pruneCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be pruned without deleting")
 	pruneCmd.Flags().BoolVar(&pruneAll, "all", false, "delete all telemetry data")
 
+	var catalog commandCatalog
 	rootCmd.AddCommand(nativeRunCommand())
-	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, assertCommand(), pruneCmd, upgradeCommand())
+	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, assertCommand(), pruneCmd, upgradeCommand(), commandsCommand(&catalog))
+	rootCmd.InitDefaultVersionFlag()
+	catalog = buildCommandCatalog(rootCmd, version)
 
 	ctx := context.Background()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
