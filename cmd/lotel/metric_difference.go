@@ -14,6 +14,14 @@ import (
 )
 
 func metricDifferenceCommand() *cobra.Command {
+	return metricComparisonCommand(false)
+}
+
+func metricDeltaTotalCommand() *cobra.Command {
+	return metricComparisonCommand(true)
+}
+
+func metricComparisonCommand(delta bool) *cobra.Command {
 	var selector, fromText, toText string
 	cmd := &cobra.Command{
 		Use:   "metric-difference",
@@ -46,18 +54,30 @@ func metricDifferenceCommand() *cobra.Command {
 			if len(input) > storage.MetricSelectorByteLimit {
 				return fmt.Errorf("metric selector exceeds size limit")
 			}
-			prepared, err := storage.PrepareMetricSelector(ctx, input)
+			var prepared storage.MetricSelector
+			if delta {
+				prepared, err = storage.PrepareDeltaMetricSelector(ctx, input)
+			} else {
+				prepared, err = storage.PrepareMetricSelector(ctx, input)
+			}
 			if err != nil {
 				return fmt.Errorf("invalid metric selector: %w", err)
 			}
 			return withDatabaseJSON(func(_ *cobra.Command, _ []string, db *sql.DB) (any, error) {
+				if delta {
+					return storage.QueryMetricDeltaTotal(ctx, db, prepared, from, to)
+				}
 				return storage.QueryMetricDifference(ctx, db, prepared, from, to)
 			}, true)(cmd, args)
 		},
 	}
+	if delta {
+		cmd.Use = "metric-delta-total"
+		cmd.Short = "Total contiguous observed delta integer sum points (JSON)"
+	}
 	cmd.Flags().StringVar(&selector, "selector", "", "path to single-stream OTLP JSON selector (required)")
-	cmd.Flags().StringVar(&fromText, "from-ns", "", "first point timestamp as Unix nanoseconds (required)")
-	cmd.Flags().StringVar(&toText, "to-ns", "", "second point timestamp as Unix nanoseconds (required)")
+	cmd.Flags().StringVar(&fromText, "from-ns", "", "start timestamp as Unix nanoseconds (required)")
+	cmd.Flags().StringVar(&toText, "to-ns", "", "end timestamp as Unix nanoseconds (required)")
 	_ = cmd.MarkFlagRequired("selector")
 	_ = cmd.MarkFlagRequired("from-ns")
 	_ = cmd.MarkFlagRequired("to-ns")

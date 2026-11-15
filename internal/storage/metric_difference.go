@@ -99,13 +99,13 @@ func metricPointRelation(attrs []*commonpb.KeyValue, id metricSelection) metricI
 
 type metricPointAttributes interface{ GetAttributes() []*commonpb.KeyValue }
 
-func visitMetricPoints(metric *metricpb.Metric, visit func(metricPointAttributes, *metricpb.NumberDataPoint, bool) error) error {
+func visitMetricPoints(metric *metricpb.Metric, temporality metricpb.AggregationTemporality, visit func(metricPointAttributes, *metricpb.NumberDataPoint, bool) error) error {
 	switch data := metric.Data.(type) {
 	case *metricpb.Metric_Sum:
 		if data.Sum == nil {
 			return fmt.Errorf("indeterminate: missing sum")
 		}
-		valid := data.Sum.IsMonotonic && data.Sum.AggregationTemporality == metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE
+		valid := data.Sum.IsMonotonic && data.Sum.AggregationTemporality == temporality
 		for _, point := range data.Sum.DataPoints {
 			if point == nil {
 				return fmt.Errorf("indeterminate: missing point")
@@ -170,10 +170,11 @@ func visitMetricPoints(metric *metricpb.Metric, visit func(metricPointAttributes
 	return nil
 }
 
-func observedMetricPoints(ctx context.Context, db *sql.DB, id metricSelection, from, to uint64) ([]metricObservation, error) {
+func observedMetricPoints(ctx context.Context, db *sql.DB, selector MetricSelector, from, to uint64) ([]metricObservation, error) {
 	if from == 0 || to == 0 || from >= to {
 		return nil, fmt.Errorf("point timestamps must be nonzero and increasing")
 	}
+	id := selector.identity
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -234,7 +235,7 @@ func observedMetricPoints(ctx context.Context, db *sql.DB, id metricSelection, f
 					if metric.Name != id.name || metric.Unit != id.unit {
 						continue
 					}
-					err := visitMetricPoints(metric, func(attrs metricPointAttributes, point *metricpb.NumberDataPoint, validType bool) error {
+					err := visitMetricPoints(metric, selector.temporality, func(attrs metricPointAttributes, point *metricpb.NumberDataPoint, validType bool) error {
 						if err := ctx.Err(); err != nil {
 							return err
 						}
@@ -281,7 +282,10 @@ func observedMetricPoints(ctx context.Context, db *sql.DB, id metricSelection, f
 
 func QueryMetricDifference(ctx context.Context, db *sql.DB, selector MetricSelector, from, to uint64) (MetricDifference, error) {
 	result := MetricDifference{}
-	points, err := observedMetricPoints(ctx, db, selector.identity, from, to)
+	if selector.temporality != metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE {
+		return result, fmt.Errorf("invalid cumulative metric selector")
+	}
+	points, err := observedMetricPoints(ctx, db, selector, from, to)
 	if err != nil {
 		return result, err
 	}
