@@ -14,8 +14,12 @@ import (
 	"time"
 )
 
-// State represents the persisted state of a running collector container.
+// State represents the persisted state of a managed collector.
 type State struct {
+	Backend         string    `json:"backend,omitempty"`
+	PID             int       `json:"pid,omitempty"`
+	ControlSocket   string    `json:"control_socket,omitempty"`
+	ControlToken    string    `json:"control_token,omitempty"`
 	ContainerID     string    `json:"container_id"`
 	ContainerName   string    `json:"container_name"`
 	Image           string    `json:"image"`
@@ -28,6 +32,8 @@ type State struct {
 
 // Status represents the current status of the collector.
 type Status struct {
+	Backend       string `json:"backend,omitempty"`
+	PID           int    `json:"pid,omitempty"`
 	ConfigPath    string `json:"config_path,omitempty"`
 	Running       bool   `json:"running"`
 	ContainerID   string `json:"container_id,omitempty"`
@@ -93,7 +99,7 @@ func writeState(s *State) error {
 	}
 	// Atomic write: write to temp file then rename.
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("writing state file: %w", err)
 	}
 	return os.Rename(tmp, path)
@@ -134,55 +140,7 @@ func containerExists() bool {
 	return err == nil
 }
 
-func InspectForUpgrade(ctx context.Context) (*Status, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	docker, err := findDocker()
-	if err != nil {
-		return nil, err
-	}
-	list := exec.CommandContext(ctx, docker, "ps", "--all", "--filter", "name=^/"+containerName+"$", "--format", "{{.ID}}")
-	list.WaitDelay = time.Second
-	out, err := list.Output()
-	if err != nil {
-		return nil, fmt.Errorf("inspect Collector container list: %w", err)
-	}
-	ids := strings.Fields(string(out))
-	if len(ids) == 0 {
-		return &Status{}, nil
-	}
-	if len(ids) != 1 || len(ids[0]) < 12 || len(ids[0]) > 64 || strings.Trim(ids[0], "0123456789abcdef") != "" {
-		return nil, fmt.Errorf("Docker returned an invalid Collector container ID")
-	}
-	inspect := exec.CommandContext(ctx, docker, "inspect", "--format", "{{.State.Running}}", ids[0])
-	inspect.WaitDelay = time.Second
-	out, err = inspect.Output()
-	if err != nil {
-		return nil, fmt.Errorf("inspect Collector running state: %w", err)
-	}
-	switch strings.TrimSpace(string(out)) {
-	case "false":
-		return &Status{}, nil
-	case "true":
-	default:
-		return nil, fmt.Errorf("Docker returned an invalid Collector running state")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	state, err := readStateFile(filepath.Join(home, stateDir, stateFile))
-	if err != nil {
-		return nil, err
-	}
-	if state == nil || state.ConfigPath == "" {
-		return nil, fmt.Errorf("running Collector has no recorded config path; restart it with lotel before upgrading")
-	}
-	return &Status{Running: true, ConfigPath: state.ConfigPath}, nil
-}
-
-// Start launches the collector as a Docker container.
-func Start(ctx context.Context, configPath, dataPath string) error {
+func startDocker(ctx context.Context, configPath, dataPath string) error {
 	absConfig, err := filepath.Abs(configPath)
 	if err != nil {
 		return err
@@ -206,7 +164,7 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 			return nil
 		}
 		fmt.Println("Collector configuration or launch options changed; restarting.")
-		if err := Stop(ctx); err != nil {
+		if err := stopDocker(ctx); err != nil {
 			return err
 		}
 	}
@@ -280,8 +238,7 @@ func Start(ctx context.Context, configPath, dataPath string) error {
 	return nil
 }
 
-// Stop terminates the running collector container.
-func Stop(ctx context.Context) error {
+func stopDocker(ctx context.Context) error {
 	if !isContainerRunning() && !containerExists() {
 		_ = removeState()
 		fmt.Println("No collector is running.")
@@ -314,9 +271,11 @@ func GetStatus(ctx context.Context) (*Status, error) {
 		return &Status{}, err
 	}
 
-	status := &Status{}
+	if state != nil && state.Backend == "native" {
+		return nativeStatus(ctx, state)
+	}
+	status := &Status{Backend: "docker"}
 	if !isContainerRunning() {
-		_ = removeState()
 		return status, nil
 	}
 
@@ -350,7 +309,22 @@ func checkHealth() bool {
 func WaitHealthy(ctx context.Context, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if checkHealth() {
+		state, err := readState()
+		if err != nil {
+			return err
+		}
+		if state != nil && state.Backend == "native" {
+			status, err := nativeStatus(ctx, state)
+			if err != nil {
+				return err
+			}
+			if !status.Running {
+				return fmt.Errorf("native collector is not running")
+			}
+			if status.Healthy {
+				return nil
+			}
+		} else if checkHealth() {
 			return nil
 		}
 		select {

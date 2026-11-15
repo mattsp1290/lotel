@@ -12,12 +12,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/mattsp1290/lotel/internal/upgrade"
 )
+
+func TestCollectorRestartArgsPreserveBackend(t *testing.T) {
+	for _, tc := range []struct {
+		backend string
+		want    []string
+	}{
+		{"native", []string{"start", "--wait", "--config", "/custom space/collector.yaml", "--backend", "native"}},
+		{"docker", []string{"start", "--wait", "--config", "/custom space/collector.yaml"}},
+		{"", []string{"start", "--wait", "--config", "/custom space/collector.yaml"}},
+	} {
+		if got := collectorRestartArgs("/custom space/collector.yaml", tc.backend); !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("backend=%q args=%q want=%q", tc.backend, got, tc.want)
+		}
+	}
+}
 
 func lifecycleFixture(t *testing.T) upgrade.Request {
 	t.Helper()

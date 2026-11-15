@@ -24,7 +24,7 @@ func TestStartEnablesProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	dataPath := filepath.Join(tmp, "data")
-	if err := Start(context.Background(), cfg, dataPath); err != nil {
+	if err := Start(context.Background(), cfg, dataPath, "docker"); err != nil {
 		t.Fatal(err)
 	}
 	args, err := os.ReadFile(argsPath)
@@ -109,6 +109,23 @@ func TestIsContainerRunning_NoDocker(t *testing.T) {
 	running := isContainerRunning()
 	if running {
 		t.Error("expected false when no lotel-collector container exists")
+	}
+}
+
+func TestStatusPreservesLifecycleState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	state := &State{ContainerName: "lotel-collector", ContainerID: "previous-container"}
+	if err := writeState(state); err != nil {
+		t.Fatal(err)
+	}
+	status, err := GetStatus(t.Context())
+	if err != nil || status.Running {
+		t.Fatalf("status: %+v, %v", status, err)
+	}
+	saved, err := readState()
+	if err != nil || saved == nil || saved.ContainerID != state.ContainerID {
+		t.Fatalf("status changed lifecycle state: %+v, %v", saved, err)
 	}
 }
 

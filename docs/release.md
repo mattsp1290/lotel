@@ -14,8 +14,9 @@ The first published release is required before the public install URL works.
 
 Linux binaries use bundled DuckDB archives but still link system C/C++
 libraries. They are not static musl binaries. Alpine and Windows are not
-supported release targets. Docker must be installed and running to collect
-telemetry. Installation and release checks do not require Docker.
+supported release targets. Docker must be installed and running for the default
+backend. Native collection does not require Docker. Installation and release
+checks do not require Docker.
 
 The release workflow builds each target natively with CGO enabled. It executes
 `--version` and a DuckDB query with an isolated home on each target. Local
@@ -67,7 +68,9 @@ lotel upgrade --version v1.2.3
 `--check` fetches and validates metadata, reports the target, and exits 0 when
 an update exists. It never changes the executable or contacts the Collector.
 Plain upgrades skip equal or older releases. `--version` selects a stable tag
-and permits a deliberate rollback. Neither path opens the telemetry database.
+and permits a deliberate rollback. Release validation does not open the telemetry
+database. Native Collector shutdown flushes and indexes pending telemetry before
+replacement.
 
 Before any Collector interruption, the updater downloads the candidate beside
 the resolved executable, verifies its SHA-256, and checks its version with a
@@ -78,16 +81,18 @@ If it is running, the CLI warns agents on stderr that OpenTelemetry collection
 will be unavailable, stops the Collector, replaces the executable, then runs
 `start --wait --config <recorded-config-path>` through the new executable.
 The new version can therefore update the Collector image and managed defaults.
-Restart preserves the recorded configuration choice even when upgrade runs
+Native Collectors also receive `--backend native`; Docker keeps the default backend.
+Restart preserves the recorded backend and configuration choice even when upgrade runs
 from another directory. Custom configuration files remain untouched.
 
 Agents must treat the interval between the stop warning and healthy restart as
 a telemetry gap. Do not run application checks that require complete telemetry
 during this interval. The CLI reports when collection resumes. It preserves an
 initially stopped Collector. Checks, no-op upgrades, and validation failures do
-not stop or restart it. A replacing upgrade requires Docker inspection to
-succeed. A daemon, permission, or inspection failure aborts before replacement
-and preserves the executable and recorded Collector state.
+not stop or restart it. A replacing upgrade authenticates native Collector status
+or inspects Docker for the default backend. An authentication, daemon, permission,
+or inspection failure aborts before replacement and preserves the executable and
+recorded Collector state. Native installations do not require a Docker executable.
 
 If stopping or replacement fails after the stop begins, the CLI attempts to
 restart through the executable still at the installation path. Recovery uses
@@ -147,7 +152,7 @@ make check
 make install
 ```
 
-Go 1.24.4 or later, CGO, and a native C/C++ toolchain are required.
+Go 1.26 or later, CGO, and a native C/C++ toolchain are required.
 `make build` derives the version from Git; `VERSION=v1.2.3` overrides it.
 `PREFIX` selects the source install prefix, defaults to `$HOME/.local`, and
 `DESTDIR` stages it. Direct `go build` reports `dev`.

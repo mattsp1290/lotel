@@ -2,6 +2,9 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,6 +67,103 @@ esac
 			got, err := os.ReadFile(statePath)
 			if err != nil || string(got) != string(original) {
 				t.Fatalf("state=%q err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestInspectForUpgradeWithoutDocker(t *testing.T) {
+	for _, recorded := range []bool{false, true} {
+		t.Run(map[bool]string{false: "fresh native installation", true: "recorded Docker installation"}[recorded], func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("PATH", t.TempDir())
+			if recorded {
+				if err := writeState(&State{ConfigPath: "/custom/docker.yaml"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			status, err := InspectForUpgrade(context.Background())
+			if recorded {
+				if err == nil {
+					t.Fatalf("accepted unknown Docker state: %+v", status)
+				}
+			} else {
+				if err != nil || status.Running {
+					t.Fatalf("status=%+v err=%v", status, err)
+				}
+				if _, err := os.Stat(filepath.Join(home, stateDir)); !os.IsNotExist(err) {
+					t.Fatalf("created state directory: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestInspectForUpgradeRejectsUnknownBackend(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	if err := writeState(&State{Backend: "unknown", ConfigPath: "/custom/config.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := InspectForUpgrade(context.Background()); err == nil {
+		t.Fatalf("accepted unknown backend: %+v", status)
+	}
+}
+
+func TestInspectNativeForUpgradeAuthenticatesWithoutMutatingState(t *testing.T) {
+	for _, authenticated := range []bool{true, false} {
+		t.Run(map[bool]string{true: "authenticated", false: "wrong nonce"}[authenticated], func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("PATH", t.TempDir())
+			dir, err := os.MkdirTemp("", "lotel-upgrade-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(dir) })
+			path := filepath.Join(dir, "control.sock")
+			listener, err := net.Listen("unix", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/status" {
+					t.Errorf("mutating request: %s %s", r.Method, r.URL.Path)
+				}
+				if r.Header.Get("Authorization") != "Bearer correct" {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				json.NewEncoder(w).Encode(Status{Backend: "native", Running: true, Healthy: true, PID: 123})
+			})}
+			go server.Serve(listener)
+			defer server.Close()
+			token := "wrong"
+			if authenticated {
+				token = "correct"
+			}
+			if err := writeState(&State{Backend: "native", ConfigPath: "/custom/native.yaml", ControlSocket: path, ControlToken: token}); err != nil {
+				t.Fatal(err)
+			}
+			statePath, err := stateFilePath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := InspectForUpgrade(context.Background())
+			if authenticated {
+				if err != nil || !status.Running || status.Backend != "native" || status.ConfigPath != "/custom/native.yaml" {
+					t.Fatalf("status=%+v err=%v", status, err)
+				}
+			} else if err == nil {
+				t.Fatalf("accepted unauthenticated status: %+v", status)
+			}
+			after, err := os.ReadFile(statePath)
+			if err != nil || string(before) != string(after) {
+				t.Fatalf("modified state: %s -> %s, err=%v", before, after, err)
 			}
 		})
 	}

@@ -1,8 +1,8 @@
 # lotel
 
-Collect and query OpenTelemetry on your machine. Lotel runs the OTel Collector
-in Docker and indexes its JSONL files in DuckDB. Queries return JSON for coding
-agents and scripts.
+Collect and query OpenTelemetry on your machine. Lotel runs official Go
+Collector components as a native process or Docker container and indexes their
+JSONL files in DuckDB. Queries return JSON for coding agents and scripts.
 
 `lotel` gives a coding agent local traces, metrics, and logs to check an
 application while it runs. The default Collector writes telemetry to your
@@ -60,17 +60,17 @@ the executable in place.
 Before replacement, `upgrade` warns on stderr that OpenTelemetry collection
 will be unavailable. Agents must retain stderr even when they request `--json`.
 It stops a running Collector, replaces the executable, then uses the new
-executable to restart the Collector with its recorded configuration and wait for
-health. An upgrade can therefore apply new Collector versions and defaults.
+executable to restart the Collector with its recorded backend and configuration
+and wait for health. An upgrade can therefore apply new Collector versions and defaults.
 Telemetry emitted during that gap can be lost unless your application buffers
 or retries it. An initially stopped Collector stays stopped. `--check` and upgrades that need no replacement
-do not interrupt collection. If Docker cannot report the Collector state,
-the upgrade aborts before replacement and preserves the recorded state.
+do not interrupt collection. If the recorded backend cannot report the Collector
+state, the upgrade aborts before replacement and preserves the recorded state.
 
 If an upgrade fails after the stop, it attempts to restart collection and reports
 any recovery failure. Use the recovery command printed by `upgrade`, including
-its recorded `--config` path, then run `lotel health`. Resume telemetry checks
-only after the Collector is healthy.
+its recorded `--config` path and native backend flag when present, then run
+`lotel health`. Resume telemetry checks only after the Collector is healthy.
 Upgrading the executable preserves the local telemetry files. The Collector may
 refresh its managed configuration when it starts.
 
@@ -82,7 +82,8 @@ upgrade safeguards, and release publishing.
 
 ## Quick start
 
-Install and start Docker before you start the Collector.
+Install and start Docker for the default backend, or use `lotel start --backend native --wait`
+to run the official Go Collector components without Docker.
 
 ```bash
 lotel start --wait
@@ -177,8 +178,8 @@ agent. The [content redaction examples](#genai) cover LLM message content.
 
 ## Build from source
 
-Building requires Make, Go 1.24.4 or later, CGO enabled, and a C/C++ toolchain
-for DuckDB. Running the Collector requires Docker.
+Building requires Make, Go 1.26 or later, CGO enabled, and a C/C++ toolchain
+for DuckDB. The default Collector backend requires Docker; the native backend does not.
 
 ```bash
 git clone https://github.com/mattsp1290/lotel.git
@@ -195,10 +196,12 @@ lotel --version
 | `lotel --version` | Show the executable version |
 | `lotel upgrade [--check] [--json] [--version vX.Y.Z]` | Check for or install a release |
 | `lotel start [--wait] [--config <path>]` | Start the OTel Collector container |
+| `lotel start --backend native [--wait]` | Start the bundled Collector without Docker, with automatic ingestion |
 | `lotel stop` | Stop the collector |
 | `lotel status` | Show collector status (JSON) |
 | `lotel health` | Check collector health (exit 0/1) |
 | `lotel ingest` | Incrementally ingest new JSONL telemetry (JSON report) |
+| `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
 | `lotel query traces` | Query traces (JSON output) |
 | `lotel query metrics` | Query metrics (JSON output) |
 | `lotel query logs` | Query logs (JSON output) |
@@ -302,9 +305,9 @@ This makes lotel suitable for scripted and agent-driven workflows.
 
 ```
 Application → OTLP (gRPC :4317 / HTTP :4318)
-    → OTel Collector (Docker container)
+    → OTel Collector (native process or Docker container)
         → ~/.lotel/data/{traces,metrics,logs,profiles}/*.jsonl
-            → lotel ingest → DuckDB (~/.lotel/data/lotel.db)
+            → manual or automatic ingestion → DuckDB (~/.lotel/data/lotel.db)
                 → lotel query → JSON output
 ```
 
@@ -312,7 +315,7 @@ Application → OTLP (gRPC :4317 / HTTP :4318)
 
 - **Raw**: JSONL files written by the collector to `~/.lotel/data/{traces,metrics,logs,profiles}/`
 - **Indexed**: DuckDB database at `~/.lotel/data/lotel.db` (populated by `lotel ingest`)
-- **State**: Container ID and config at `~/.lotel/collector.state`
+- **State**: Backend, container or process identity, and config at `~/.lotel/collector.state`
 - **Config**: Default config at `~/.lotel/collector-config.yaml` (auto-generated)
 
 Schema v3 adds complete OTLP resource envelopes alongside the existing query
@@ -325,11 +328,13 @@ records. A skipped projection does not imply that its OTLP payload was lost.
 `projection_skipped_lines` counts envelopes that the convenience decoder could
 not interpret. Prune reports use `otlp_envelopes_deleted` for complete envelopes.
 
-The v2 upgrade preserves indexed rows and existing ingestion progress. Complete
-OTLP retention starts at that progress point, so previously ingested history
+Upgrading from schema v2 to v3 preserves indexed rows and existing ingestion
+progress. Complete OTLP retention starts at that progress point, so previously ingested history
 remains available through the existing queries. It does not gain complete
-OTLP payloads retroactively. Databases older than v2 still rebuild their index.
-Run `lotel ingest` to reload that raw history. Pruned rows can reappear after
+OTLP payloads retroactively. Run `lotel ingest --full` to backfill complete
+envelopes from retained raw history without duplicating projected rows.
+Databases older than v2 still rebuild their index. Run `lotel ingest` to reload
+that raw history. Pruned rows can reappear after
 a rebuild because prune leaves the raw JSONL files intact.
 
 ## Configuration
@@ -364,6 +369,67 @@ File exporters use `append: true`, so raw telemetry survives restarts and grows
 until you delete it. Custom configs must also set `append: true`.
 File-exporter rotation is unsupported. Spanmetrics uses delta temporality to
 avoid appending the same idle series on every flush.
+
+### Run without Docker
+
+The native backend bundles official OpenTelemetry Go Collector v0.165.0
+components. It includes the OTLP receiver, batch and GenAI normalizer processors,
+transform processor, spanmetrics connector, file exporter, and health extension.
+The existing content redaction and hash recipes work with this backend.
+Use Docker for custom configurations that need other contrib components.
+
+```bash
+go build -o lotel ./cmd/lotel
+./lotel start --backend native --wait
+./lotel status
+./lotel query traces --service my-app --since 10m
+./lotel stop
+```
+
+Stop an existing collector before changing backends. Docker remains the default.
+Both backends use the same raw files and database. Native mode translates file
+exporter paths under `/data` to the host data directory. Other paths and custom
+receiver ports stay as configured. Collector output goes to
+`~/.lotel/collector.log`. Native lifecycle control uses a private Unix socket.
+
+Native mode ingests at startup, every two minutes, and after exporters flush
+during shutdown. Each pass releases DuckDB so separate CLI commands can query
+the database. An ingestion error goes to the Collector log and the next pass
+retries. Collection continues after ingestion errors.
+
+During shutdown, `stop` waits for exporter flush and final indexing. It retries
+temporary database locks for up to five seconds. If final indexing still fails,
+the Collector stops and `stop` exits with an error. Raw JSONL remains available.
+Run `lotel ingest` after the database becomes available to index those records.
+
+Add this optional section to `./lotel-collector.yaml` to change automatic
+ingestion in native mode:
+
+```yaml
+ingestion:
+  enabled: true
+  interval: 30s
+```
+
+The interval must be a positive Go duration. Set `enabled: false` to disable
+all automatic ingestion, including startup and shutdown. The `ingestion`
+section is specific to native mode. Remove it before using the same config
+with Docker. Manual `lotel ingest` works with either backend.
+
+### Rebuild the index
+
+`lotel ingest --full` clears projected rows, complete OTLP envelopes, and
+ingestion cursors, then rereads retained JSONL for all four signals in one
+transaction. A read or storage error rolls the
+transaction back. Malformed records follow the normal ingestion rules and
+appear in the report. Raw files stay intact. Previously pruned rows return
+when their raw data remains. Indexed rows without retained raw data disappear.
+Repeated full rebuilds do not duplicate records.
+
+The comparison with [lotel-rs](https://github.com/mattsp1290/lotel-rs/tree/77270b2971422571434b2dc77e38581b1da89618)
+identified native collection, periodic ingestion, and full rebuilding as the
+missing non-embedding capabilities. Go already provides the corresponding
+query, aggregation, and retention commands, plus GenAI and attribute filters.
 
 <a id="genai"></a>
 ## GenAI / LLM observability
@@ -425,7 +491,16 @@ resolves current and legacy aliases listed in
 
 ## Verification
 
-Docker must be running. The deterministic test needs no LLM credentials:
+The native CLI check uses temporary data, isolated ports, and a PATH without
+Docker. It exercises HTTP JSON, HTTP protobuf, gRPC, automatic ingestion,
+GenAI queries, restarts, shutdown flush, and full rebuilding:
+
+```bash
+go build -o lotel ./cmd/lotel
+LOTEL_NATIVE_TEST_BIN="$PWD/lotel" go test ./internal/collector -run '^TestNativeCLI$' -count=1 -v
+```
+
+For Docker verification, start Docker first. These checks need no LLM credentials:
 
 ```bash
 go test ./...
@@ -476,8 +551,8 @@ work. See [issue tracking setup and migration](docs/issue-tracking.md).
 
 ## Runtime requirements
 
-- Docker installed and running.
 - A supported Linux or macOS host. See [release platform requirements](docs/release.md).
+- Docker installed and running for the default backend. Native mode does not require Docker.
 
 Prebuilt installations do not require Go or a compiler. Source builds need the
 [build requirements](#build-from-source).
