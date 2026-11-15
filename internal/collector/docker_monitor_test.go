@@ -57,7 +57,7 @@ func TestDockerInspectionTimeout(t *testing.T) {
 	if running, err := inspectDockerRunning(t.Context()); err == nil || running {
 		t.Fatalf("hung Docker inspection reported known state: %t %v", running, err)
 	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
+	if elapsed := time.Since(start); elapsed > 2*dockerInspectionTimeout+time.Second {
 		t.Fatalf("Docker inspection exceeded its bounded timeout: %s", elapsed)
 	}
 }

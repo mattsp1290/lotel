@@ -142,16 +142,29 @@ func inspectDockerRunning(ctx context.Context) (bool, error) {
 
 // inspectDockerState distinguishes absence from stopped and unknown Docker state.
 func inspectDockerState(ctx context.Context) (running, exists bool, err error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Running}}", containerName)
+	inspectCtx, cancelInspect := context.WithTimeout(ctx, dockerInspectionTimeout)
+	cmd := exec.CommandContext(inspectCtx, "docker", "inspect", "-f", "{{.State.Running}}", containerName)
 	cmd.WaitDelay = 100 * time.Millisecond
 	out, err := cmd.Output()
+	inspectContextErr := inspectCtx.Err()
+	cancelInspect()
 	if err != nil {
+		if ctx.Err() != nil {
+			return false, false, fmt.Errorf("inspect Collector running state: %w", ctx.Err())
+		}
+		if inspectContextErr != nil {
+			err = inspectContextErr
+		}
 		// A successful inventory can confirm removal; a failed inspect alone cannot.
-		list := exec.CommandContext(ctx, "docker", "ps", "--all", "--filter", "name=^/"+containerName+"$", "--format", "{{.ID}}")
+		listCtx, cancelList := context.WithTimeout(ctx, dockerInspectionTimeout)
+		list := exec.CommandContext(listCtx, "docker", "ps", "--all", "--filter", "name=^/"+containerName+"$", "--format", "{{.ID}}")
 		list.WaitDelay = 100 * time.Millisecond
-		if ids, listErr := list.Output(); listErr == nil && len(strings.Fields(string(ids))) == 0 {
+		ids, listErr := list.Output()
+		cancelList()
+		if ctx.Err() != nil {
+			return false, false, fmt.Errorf("inspect Collector running state: %w", ctx.Err())
+		}
+		if listErr == nil && len(strings.Fields(string(ids))) == 0 {
 			return false, false, nil
 		}
 		return false, false, fmt.Errorf("inspect Collector running state: %w", err)
@@ -334,7 +347,11 @@ func GetStatus(ctx context.Context) (*Status, error) {
 		return runtimeStatus(ctx, state)
 	}
 	status := &Status{Backend: "docker"}
-	if !isContainerRunning() {
+	running, _ := inspectDockerRunning(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !running {
 		return status, nil
 	}
 
@@ -348,15 +365,26 @@ func GetStatus(ctx context.Context) (*Status, error) {
 	} else {
 		status.ContainerName = containerName
 	}
-	status.Healthy = checkHealth()
+	status.Healthy = checkHealthContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	return status, nil
 }
 
 // checkHealth probes the collector health endpoint.
 func checkHealth() bool {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(healthURL)
+	return checkHealthContext(context.Background())
+}
+
+func checkHealthContext(ctx context.Context) bool {
+	client := &http.Client{Timeout: collectorHealthTimeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}
@@ -366,14 +394,27 @@ func checkHealth() bool {
 
 // WaitHealthy polls the health endpoint until healthy or timeout.
 func WaitHealthy(ctx context.Context, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	deadlineError := func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("collector did not become healthy within %s", timeout)
+	}
+	for {
+		if waitCtx.Err() != nil {
+			return deadlineError()
+		}
 		state, err := readState()
 		if err != nil {
 			return err
 		}
 		if state != nil && state.ControlSocket != "" {
-			status, err := runtimeStatus(ctx, state)
+			status, err := runtimeStatus(waitCtx, state)
+			if waitCtx.Err() != nil {
+				return deadlineError()
+			}
 			if err != nil {
 				return err
 			}
@@ -383,16 +424,21 @@ func WaitHealthy(ctx context.Context, timeout time.Duration) error {
 			if status.Healthy {
 				return nil
 			}
-		} else if checkHealth() {
-			return nil
+		} else {
+			healthy := checkHealthContext(waitCtx)
+			if waitCtx.Err() != nil {
+				return deadlineError()
+			}
+			if healthy {
+				return nil
+			}
 		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-waitCtx.Done():
+			return deadlineError()
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("collector did not become healthy within %s", timeout)
 }
 
 // ContainerID returns the running collector container ID, or empty if not running.

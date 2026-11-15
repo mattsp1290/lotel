@@ -166,8 +166,8 @@ func startRuntime(ctx context.Context, configPath, dataPath, backend string) (re
 			stopStartupChild(command, done)
 		}
 	}
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
+	readyCtx, cancelReady := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelReady()
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -175,9 +175,9 @@ func startRuntime(ctx context.Context, configPath, dataPath, backend string) (re
 			stopChild()
 			return err
 		}
-		status, statusErr := requestRuntimeStatus(ctx, state)
+		status, statusErr := requestRuntimeStatus(readyCtx, state)
 		if statusErr == nil && status.Running {
-			if err := ctx.Err(); err != nil {
+			if err := readyCtx.Err(); err != nil {
 				stopChild()
 				return err
 			}
@@ -195,8 +195,11 @@ func startRuntime(ctx context.Context, configPath, dataPath, backend string) (re
 		case <-ctx.Done():
 			stopChild()
 			return ctx.Err()
-		case <-deadline.C:
+		case <-readyCtx.Done():
 			stopChild()
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return fmt.Errorf("collector runtime did not become ready; inspect %s", logPath)
 		case <-tick.C:
 		}
