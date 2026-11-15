@@ -11,13 +11,15 @@ import (
 )
 
 type traceBundle struct {
-	TraceID string                `json:"trace_id"`
-	Spans   []storage.TraceResult `json:"spans"`
-	Logs    []storage.LogResult   `json:"logs"`
+	TraceID       string                `json:"trace_id"`
+	Spans         []storage.TraceResult `json:"spans"`
+	Logs          []storage.LogResult   `json:"logs"`
+	Relationships *traceRelationships   `json:"relationships,omitempty"`
 }
 
 func traceCommand() *cobra.Command {
-	return &cobra.Command{
+	var relationships bool
+	cmd := &cobra.Command{
 		Use:   "trace <trace-id>",
 		Short: "Query a trace and its correlated logs (JSON)",
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -62,7 +64,15 @@ func traceCommand() *cobra.Command {
 			}
 			encoder := json.NewEncoder(cmd.OutOrStdout())
 			encoder.SetIndent("", "  ")
-			return encoder.Encode(traceBundle{TraceID: args[0], Spans: spans, Logs: logs})
+			bundle := traceBundle{TraceID: args[0], Spans: spans, Logs: logs}
+			if relationships {
+				if err := bundle.resolveRelationships(); err != nil {
+					return err
+				}
+			}
+			return encoder.Encode(bundle)
 		},
 	}
+	cmd.Flags().BoolVar(&relationships, "relationships", false, "resolve span parents and log references")
+	return cmd
 }

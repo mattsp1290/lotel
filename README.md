@@ -279,6 +279,21 @@ Empty arrays mean no matching projected records were found. As with other
 convenience queries, the projections can omit fields or records. Use `query otlp`
 for complete retained OTLP envelopes.
 
+Add `--relationships` to resolve span parents and log span IDs within the
+returned bundle. The command sorts spans and logs by timestamp and then by
+their complete projected JSON before assigning zero-based array indices.
+Identical records remain separate and their indices are interchangeable.
+Indices can change when the stored records change.
+
+The `relationships.span_parents` and `relationships.log_spans` arrays align
+with the returned spans and logs. Each entry has a `state`. A `linked` entry
+contains one index in `span_indices`; an `ambiguous` entry contains every
+matching index. `missing` means no matching span was found. `invalid` means
+the referenced ID is malformed or zero. An empty parent is `root`; an empty
+log span ID is `unscoped`. `cycle_span_indices` lists spans that form a cycle
+through uniquely resolved parents. Relationships follow recorded IDs and do
+not prove causality or a complete trace.
+
 ### Complete telemetry data
 
 `query otlp` retains the complete JSON exported by the Collector. Each result
