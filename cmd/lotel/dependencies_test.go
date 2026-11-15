@@ -2,7 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +15,69 @@ import (
 
 	"github.com/mattsp1290/lotel/internal/storage"
 )
+
+type blockedDependencyOutput struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w *blockedDependencyOutput) Write(p []byte) (int, error) {
+	close(w.started)
+	<-w.release
+	return len(p), nil
+}
+
+type failingDependencyOutput struct{ err error }
+
+func (w failingDependencyOutput) Write([]byte) (int, error) { return 0, w.err }
+
+func TestDependenciesReleasesDatabaseBeforeOutput(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writer := &blockedDependencyOutput{started: make(chan struct{}), release: make(chan struct{})}
+	cmd := dependenciesCommand()
+	cmd.SetOut(writer)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	cmd.SetArgs([]string{"--since", "1h"})
+	finished := make(chan error, 1)
+	go func() { finished <- cmd.Execute() }()
+	defer func() {
+		select {
+		case <-writer.release:
+		default:
+			close(writer.release)
+		}
+	}()
+	select {
+	case <-writer.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("query did not reach output")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	path := filepath.Join(home, ".lotel", "data", "lotel.db")
+	if err := storage.WithDB(ctx, path, func(db *sql.DB) error { return db.PingContext(ctx) }); err != nil {
+		t.Fatalf("query held the database while output was blocked: %v", err)
+	}
+	close(writer.release)
+	if err := <-finished; err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+}
+
+func TestDependenciesPropagatesOutputError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	want := errors.New("output unavailable")
+	cmd := dependenciesCommand()
+	cmd.SetOut(failingDependencyOutput{err: want})
+	cmd.SetErr(io.Discard)
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	cmd.SetArgs([]string{"--since", "1h"})
+	if err := cmd.Execute(); !errors.Is(err, want) {
+		t.Fatalf("got %v, want output error", err)
+	}
+}
 
 func TestDependenciesCLI(t *testing.T) {
 	home := t.TempDir()

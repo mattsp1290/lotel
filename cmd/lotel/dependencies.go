@@ -23,13 +23,15 @@ func dependenciesCommand() *cobra.Command {
 			if !validBoundedWindow(start, end, now) {
 				return fmt.Errorf("invalid dependency window")
 			}
-			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
-				report, err := storage.QueryDependencies(db, storage.DependencyOptions{Since: start, Until: end})
-				if err != nil {
-					return err
-				}
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
-			})(cmd, args)
+			var report storage.DependencyReport
+			if err := withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+				var err error
+				report, err = storage.QueryDependencies(db, storage.DependencyOptions{Since: start, Until: end})
+				return err
+			})(cmd, args); err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "", "inclusive start (RFC3339 or positive duration, required)")
