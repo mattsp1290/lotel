@@ -24,6 +24,12 @@ type QueryOptions struct {
 	Limit     int
 }
 
+type TraceQueryOptions struct {
+	QueryOptions
+	ErrorsOnly  bool
+	MinDuration *time.Duration
+}
+
 type queryer interface {
 	Query(string, ...any) (*sql.Rows, error)
 }
@@ -110,13 +116,24 @@ type MetricAggregation struct {
 }
 
 // QueryTraces returns traces matching the given options.
-func QueryTraces(db queryer, opts QueryOptions) ([]TraceResult, error) {
-	if err := validateQueryOptions(opts); err != nil {
+func QueryTraces(db queryer, opts TraceQueryOptions) ([]TraceResult, error) {
+	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
+	if opts.MinDuration != nil && *opts.MinDuration < 0 {
+		return nil, fmt.Errorf("minimum duration must be nonnegative")
+	}
 	query := `SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR), CAST(json_object('trace_state',"trace_state",'status_message',"status_message",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version",'schema_url',"schema_url",'events',"events",'links',"links") AS VARCHAR) FROM traces WHERE 1=1`
-	args := buildWhere(&query, opts, "start_time")
-	args = append(args, buildFilters(&query, opts, "name")...)
+	args := buildWhere(&query, opts.QueryOptions, "start_time")
+	args = append(args, buildFilters(&query, opts.QueryOptions, "name")...)
+	if opts.ErrorsOnly {
+		query += " AND status_code = ?"
+		args = append(args, 2)
+	}
+	if opts.MinDuration != nil {
+		query += " AND duration_ns >= ?"
+		args = append(args, int64(*opts.MinDuration))
+	}
 
 	query += " ORDER BY start_time ASC"
 	if opts.Limit > 0 {

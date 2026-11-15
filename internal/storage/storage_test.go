@@ -32,7 +32,7 @@ func TestMigrateAndQuery(t *testing.T) {
 	}
 
 	// Query traces.
-	results, err := QueryTraces(db, QueryOptions{Service: "test-svc"})
+	results, err := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Service: "test-svc"}})
 	if err != nil {
 		t.Fatalf("QueryTraces: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestMigrateAndQuery(t *testing.T) {
 	}
 
 	// Query with wrong service returns nothing.
-	results, err = QueryTraces(db, QueryOptions{Service: "other-svc"})
+	results, err = QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Service: "other-svc"}})
 	if err != nil {
 		t.Fatalf("QueryTraces other: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestPrune(t *testing.T) {
 	}
 
 	// Verify nothing was actually deleted.
-	traces, _ := QueryTraces(db, QueryOptions{})
+	traces, _ := QueryTraces(db, TraceQueryOptions{})
 	if len(traces) != 2 {
 		t.Errorf("after dry run, traces = %d, want 2", len(traces))
 	}
@@ -145,7 +145,7 @@ func TestPrune(t *testing.T) {
 	}
 
 	// Verify only new trace remains.
-	traces, _ = QueryTraces(db, QueryOptions{})
+	traces, _ = QueryTraces(db, TraceQueryOptions{})
 	if len(traces) != 1 {
 		t.Errorf("after prune, traces = %d, want 1", len(traces))
 	}
@@ -172,7 +172,7 @@ func TestIngestTraces(t *testing.T) {
 	}
 
 	// Query.
-	results, err := QueryTraces(db, QueryOptions{Service: "my-app"})
+	results, err := QueryTraces(db, TraceQueryOptions{QueryOptions: QueryOptions{Service: "my-app"}})
 	if err != nil {
 		t.Fatalf("QueryTraces: %v", err)
 	}
