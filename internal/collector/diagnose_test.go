@@ -78,7 +78,7 @@ func TestDiagnoseRuntimeObservations(t *testing.T) {
 	})}
 	go server.Serve(listener)
 	t.Cleanup(func() { server.Close() })
-	state, err := json.Marshal(State{Backend: "native", ControlSocket: socket, ControlToken: secret})
+	state, err := json.Marshal(State{Backend: "native", PID: 1234, ControlSocket: socket, ControlToken: secret})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,12 +96,20 @@ func TestDiagnoseRuntimeObservations(t *testing.T) {
 		{"stopped with error", `{"backend":"native","running":false,"healthy":false,"ingestion":{"enabled":true,"running":false,"interval":"2s","last_error":"diagnosis-secret-token"}}`, 0, true, true, false, false, true},
 		{"empty response", `{}`, 0, false, false, false, false, false},
 		{"partial ingestion", `{"backend":"native","running":false,"healthy":false,"ingestion":{"enabled":false}}`, 0, false, false, false, false, false},
-		{"explicit null error", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_error":null}}`, 0, false, false, false, false, false},
+		{"explicit null error", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":"2025-01-02T03:04:05Z","last_error":null}}`, 0, false, false, false, false, false},
 		{"explicit null success", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":null}}`, 0, false, false, false, false, false},
 		{"healthy but stopped", `{"backend":"native","running":false,"healthy":true,"ingestion":{"enabled":false,"running":false,"interval":"2s"}}`, 0, false, false, false, false, false},
 		{"healthy with no success", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s"}}`, 0, false, false, false, false, false},
 		{"healthy with stopped ingestion", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":false,"interval":"2s","last_success":"2025-01-02T03:04:05Z"}}`, 0, false, false, false, false, false},
 		{"healthy with ingestion error", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":"2025-01-02T03:04:05Z","last_error":"diagnosis-secret-token"}}`, 0, false, false, false, false, false},
+		{"native false healthy despite ready ingestion", `{"backend":"native","running":true,"healthy":false,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":"2025-01-02T03:04:05Z"}}`, 0, false, false, false, false, false},
+		{"missing pid", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":false,"running":false,"interval":"2s"}}`, 0, false, false, false, false, false},
+		{"mismatched pid", `{"backend":"native","pid":4321,"running":true,"healthy":true,"ingestion":{"enabled":false,"running":false,"interval":"2s"}}`, 0, false, false, false, false, false},
+		{"invalid offset", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":"2025-01-02T03:04:05+24:00"}}`, 0, false, false, false, false, false},
+		{"invalid minute", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":"2025-01-02T03:04:05+00:60"}}`, 0, false, false, false, false, false},
+		{"excess precision", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":"2025-01-02T03:04:05.1234567891Z"}}`, 0, false, false, false, false, false},
+		{"utc year underflow", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":"0000-01-01T00:00:00+01:00"}}`, 0, false, false, false, false, false},
+		{"valid offset", `{"backend":"native","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":"2025-01-02T03:04:05.123456789+02:30"}}`, 0, true, true, true, true, false},
 		{"disabled but running", `{"backend":"native","running":true,"healthy":false,"ingestion":{"enabled":false,"running":true,"interval":"2s"}}`, 0, false, false, false, false, false},
 		{"invalid zero interval", `{"backend":"native","running":true,"healthy":false,"ingestion":{"enabled":true,"running":false,"interval":"0s"}}`, 0, false, false, false, false, false},
 		{"wrong backend", `{"backend":"docker","running":true,"healthy":true,"ingestion":{"enabled":true,"running":true,"interval":"2s"}}`, 0, false, false, false, false, false},
@@ -111,6 +119,9 @@ func TestDiagnoseRuntimeObservations(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body, code = tc.body, tc.code
+			if tc.name != "missing pid" && tc.name != "mismatched pid" {
+				body = strings.Replace(body, `"backend":"native"`, `"backend":"native","pid":1234`, 1)
+			}
 			got := DiagnoseRuntime(context.Background())
 			encoded, err := json.Marshal(got)
 			if err != nil {
@@ -128,8 +139,20 @@ func TestDiagnoseRuntimeObservations(t *testing.T) {
 			}
 		})
 	}
-	server.Close()
+	state, err = json.Marshal(State{Backend: "docker", PID: 1234, ControlSocket: socket, ControlToken: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, stateFile), state, 0600); err != nil {
+		t.Fatal(err)
+	}
+	body, code = `{"backend":"docker","pid":1234,"running":true,"healthy":false,"ingestion":{"enabled":true,"running":true,"interval":"2s","last_success":"2025-01-02T03:04:05Z"}}`, 0
 	got := DiagnoseRuntime(context.Background())
+	if got.Runtime.Observation != "available" || got.Runtime.CombinedHealthy == nil || *got.Runtime.CombinedHealthy {
+		t.Fatalf("Docker health failure must remain observable: %+v", got)
+	}
+	server.Close()
+	got = DiagnoseRuntime(context.Background())
 	if got.Runtime.Observation != "unavailable" || got.Ingestion.Observation != "unknown" {
 		t.Fatalf("unavailable socket: %+v", got)
 	}

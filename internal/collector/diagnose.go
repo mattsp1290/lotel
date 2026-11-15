@@ -10,8 +10,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
+
+var diagnosisTimestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$`)
 
 func decodeDiagnosis(r io.Reader, result any) error {
 	data, err := io.ReadAll(io.LimitReader(r, (1<<20)+1))
@@ -53,6 +56,7 @@ type DiagnosisIngestion struct {
 
 type diagnosticStatus struct {
 	Backend   string `json:"backend"`
+	PID       *int   `json:"pid"`
 	Running   *bool  `json:"running"`
 	Healthy   *bool  `json:"healthy"`
 	Ingestion *struct {
@@ -75,7 +79,7 @@ func DiagnoseRuntime(ctx context.Context) RuntimeDiagnosis {
 		return report
 	}
 	path := filepath.Join(home, stateDir, stateFile)
-	info, err := os.Stat(path)
+	file, err := openDiagnosisState(path)
 	if errors.Is(err, os.ErrNotExist) {
 		report.StateFile = DiagnosisState{Observation: "missing"}
 		report.Runtime.Reason = "state_missing"
@@ -84,15 +88,8 @@ func DiagnoseRuntime(ctx context.Context) RuntimeDiagnosis {
 	if err != nil {
 		return report
 	}
-	if !info.Mode().IsRegular() || info.Size() > 1<<20 {
-		return report
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return report
-	}
 	defer file.Close()
-	info, err = file.Stat()
+	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
 		return report
 	}
@@ -103,7 +100,7 @@ func DiagnoseRuntime(ctx context.Context) RuntimeDiagnosis {
 		return report
 	}
 	report.StateFile = DiagnosisState{Observation: "present"}
-	if (state.Backend != "native" && state.Backend != "docker") || state.ControlSocket == "" || state.ControlToken == "" {
+	if (state.Backend != "native" && state.Backend != "docker") || state.PID < 0 || state.ControlSocket == "" || state.ControlToken == "" {
 		report.Runtime.Reason = "state_invalid"
 		return report
 	}
@@ -114,7 +111,7 @@ func DiagnoseRuntime(ctx context.Context) RuntimeDiagnosis {
 	}
 	defer response.Body.Close()
 	var status diagnosticStatus
-	if err := decodeDiagnosis(response.Body, &status); err != nil || status.Backend != state.Backend || status.Running == nil || status.Healthy == nil || status.Ingestion == nil || status.Ingestion.Enabled == nil || status.Ingestion.Running == nil || status.Ingestion.Interval == nil {
+	if err := decodeDiagnosis(response.Body, &status); err != nil || status.Backend != state.Backend || status.PID == nil || *status.PID <= 0 || (state.PID != 0 && *status.PID != state.PID) || status.Running == nil || status.Healthy == nil || status.Ingestion == nil || status.Ingestion.Enabled == nil || status.Ingestion.Running == nil || status.Ingestion.Interval == nil {
 		report.Runtime = DiagnosisRuntime{Observation: "unavailable", Reason: "invalid_response"}
 		return report
 	}
@@ -132,11 +129,17 @@ func DiagnoseRuntime(ctx context.Context) RuntimeDiagnosis {
 	}
 	var lastSuccess *time.Time
 	if len(status.Ingestion.LastSuccess) != 0 {
-		var parsed time.Time
-		if bytes.Equal(bytes.TrimSpace(status.Ingestion.LastSuccess), []byte("null")) || json.Unmarshal(status.Ingestion.LastSuccess, &parsed) != nil {
+		var timestamp string
+		if bytes.Equal(bytes.TrimSpace(status.Ingestion.LastSuccess), []byte("null")) || json.Unmarshal(status.Ingestion.LastSuccess, &timestamp) != nil || !diagnosisTimestampPattern.MatchString(timestamp) {
 			report.Runtime = DiagnosisRuntime{Observation: "unavailable", Reason: "invalid_response"}
 			return report
 		}
+		parsed, err := time.Parse(time.RFC3339Nano, timestamp)
+		if err != nil || parsed.UTC().Year() < 0 || parsed.UTC().Year() > 9999 {
+			report.Runtime = DiagnosisRuntime{Observation: "unavailable", Reason: "invalid_response"}
+			return report
+		}
+		parsed = parsed.UTC()
 		lastSuccess = &parsed
 	}
 	if (*status.Healthy && !*status.Running) ||
@@ -144,6 +147,13 @@ func DiagnoseRuntime(ctx context.Context) RuntimeDiagnosis {
 		(*status.Healthy && *status.Ingestion.Enabled && (!*status.Ingestion.Running || lastSuccess == nil || lastError != "")) {
 		report.Runtime = DiagnosisRuntime{Observation: "unavailable", Reason: "invalid_response"}
 		return report
+	}
+	if state.Backend == "native" {
+		expectedHealthy := *status.Running && (!*status.Ingestion.Enabled || (*status.Ingestion.Running && lastSuccess != nil && lastError == ""))
+		if *status.Healthy != expectedHealthy {
+			report.Runtime = DiagnosisRuntime{Observation: "unavailable", Reason: "invalid_response"}
+			return report
+		}
 	}
 	intervalText := interval.String()
 	hasError := lastError != ""

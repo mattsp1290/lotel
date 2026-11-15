@@ -250,7 +250,8 @@ status. Historical assertions do not require a running Collector.
 
 `lotel diagnose runtime` reads the recorded runtime state and requests its
 status without creating files or opening the database. A missing state file
-means no runtime is recorded. It does not establish whether a Collector is
+means no runtime is recorded. The state must be a regular file, not a symbolic
+link. A missing state file does not establish whether a Collector is
 running. An unavailable runtime leaves its running and health values unknown.
 `combined_healthy` reflects both Collector and automatic-ingestion health.
 Ingestion errors are reported as `has_error`; the report omits the error text,
