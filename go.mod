@@ -33,6 +33,8 @@ require (
 	google.golang.org/protobuf v1.36.12
 )
 
+require github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+
 require (
 	cloud.google.com/go/compute/metadata v0.10.0 // indirect
 	github.com/Arize-ai/openinference/go/openinference-semantic-conventions v0.1.12 // indirect
