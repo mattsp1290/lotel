@@ -15,20 +15,20 @@ func ReingestAll(db *sql.DB, dataPath string) (*IngestReport, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	// Reusing cursor rows avoids DuckDB dropping deleted keys during a same-transaction upsert.
-	if _, err := tx.Exec("UPDATE ingest_state SET byte_offset=0"); err != nil {
-		return nil, fmt.Errorf("resetting ingestion progress: %w", err)
-	}
-	if _, err := tx.Exec("DELETE FROM otlp_envelopes"); err != nil {
-		return nil, fmt.Errorf("clearing OTLP envelopes: %w", err)
-	}
+	tables := []string{"otlp_envelopes"}
 	for table := range ingestStatements {
+		tables = append(tables, table)
+	}
+	for _, table := range tables {
 		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 			return nil, fmt.Errorf("clearing %s: %w", table, err)
 		}
 	}
+	if _, err := tx.Exec("UPDATE ingest_state SET byte_offset=0, fingerprint='', fingerprint_len=0"); err != nil {
+		return nil, fmt.Errorf("resetting ingestion progress: %w", err)
+	}
 	report := &IngestReport{Signals: map[string]*SignalReport{}}
-	var cursorPaths []any
+	var activePaths []any
 	for _, descriptor := range otlpSignals {
 		signal := descriptor.name
 		rep := &SignalReport{}
@@ -41,14 +41,14 @@ func ReingestAll(db *sql.DB, dataPath string) (*IngestReport, error) {
 			return nil, fmt.Errorf("reingesting %s: %w", signal, err)
 		}
 		if rep.Files > 0 {
-			cursorPaths = append(cursorPaths, path)
+			activePaths = append(activePaths, path)
 		}
 	}
-	deleteCursors := "DELETE FROM ingest_state"
-	if len(cursorPaths) > 0 {
-		deleteCursors += " WHERE path NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(cursorPaths)), ",") + ")"
+	clearObsolete := "DELETE FROM ingest_state"
+	if len(activePaths) > 0 {
+		clearObsolete += " WHERE path NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(activePaths)), ",") + ")"
 	}
-	if _, err := tx.Exec(deleteCursors, cursorPaths...); err != nil {
+	if _, err := tx.Exec(clearObsolete, activePaths...); err != nil {
 		return nil, fmt.Errorf("clearing obsolete ingestion progress: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

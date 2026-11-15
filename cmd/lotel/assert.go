@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,25 +43,22 @@ func assertCommand() *cobra.Command {
 			if !validBoundedWindow(start, end, now) {
 				return fmt.Errorf("assertion window must end no later than now and not precede --since")
 			}
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-			latest, err := storage.LatestSignal(db, storage.SignalAssertion{Signal: signal, Service: service, Since: start, Until: end})
-			if err != nil {
-				return err
-			}
-			result := signalAssertionResult{Passed: latest != nil, Signal: signal, Service: service, Since: start, Until: end, LatestTimestamp: latest}
-			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
-				return err
-			}
-			if latest == nil {
-				cmd.Root().SilenceErrors = true
-				cmd.Root().SilenceUsage = true
-				return errAssertionFailed
-			}
-			return nil
+			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+				latest, err := storage.LatestSignal(db, storage.SignalAssertion{Signal: signal, Service: service, Since: start, Until: end})
+				if err != nil {
+					return err
+				}
+				result := signalAssertionResult{Passed: latest != nil, Signal: signal, Service: service, Since: start, Until: end, LatestTimestamp: latest}
+				if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
+					return err
+				}
+				if latest == nil {
+					cmd.Root().SilenceErrors = true
+					cmd.Root().SilenceUsage = true
+					return errAssertionFailed
+				}
+				return nil
+			})(cmd, args)
 		},
 	}
 	cmd.Flags().StringVar(&signal, "signal", "", "signal: traces, metrics, or logs (required)")

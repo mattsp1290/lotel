@@ -126,6 +126,7 @@ def build_binary(path, tag, health_url, provenance="release"):
 
 
 def cli_tests(work):
+    runtimes = []
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Health)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -176,7 +177,7 @@ else:
             sentinel.write_text("preserve application telemetry\n")
             custom = home / ("application/config-$LOTEL_REVIEW_VALUE-quote'`echo wrong`\\slash.yaml" if case == "restart-failure" else "application/lotel-collector.yaml")
             custom.parent.mkdir()
-            custom.write_text("custom config preserved\n")
+            custom.write_text("receivers:\n  otlp:\n    protocols:\n      http:\n        endpoint: 127.0.0.1:4318\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    traces:\n      receivers: [otlp]\n      exporters: [debug]\n")
             config = custom
             if case == "managed":
                 config = state_dir / "collector-config.yaml"
@@ -192,6 +193,7 @@ else:
             shutil.copyfile(old, installed)
             installed.chmod(0o755)
             env = dict(os.environ, HOME=str(home), PATH=str(bindir) + os.pathsep + os.environ["PATH"], LOTEL_RELEASE_BASE_URL=tree.as_uri(), TEST_LOTEL=str(installed))
+            runtimes.append((installed, env, elsewhere, state))
             before = installed.read_bytes(), state.read_bytes(), custom.read_bytes(), sentinel.read_bytes()
             check = run([installed, "upgrade", "--check", "--json"], env, elsewhere)
             assert json.loads(check.stdout)["update_available"]
@@ -231,7 +233,9 @@ else:
             previous_calls = (home / "docker-calls.jsonl").read_bytes()
             noop = run([installed, "upgrade", "--json"], env, elsewhere)
             assert not json.loads(noop.stdout)["upgraded"]
-            assert (home / "docker-calls.jsonl").read_bytes() == previous_calls
+            current_calls = (home / "docker-calls.jsonl").read_bytes()
+            assert current_calls.startswith(previous_calls)
+            assert all(json.loads(line)["args"][0] == "inspect" for line in current_calls[len(previous_calls):].splitlines())
             if case == "stopped":
                 rollback = run([installed, "upgrade", "--version", "v0.0.1", "--json"], env, elsewhere)
                 rollback_report = json.loads(rollback.stdout)
@@ -239,6 +243,9 @@ else:
                 assert run([installed, "--version"]).stdout == "lotel v0.0.1\n"
         print("PASS real CLI check, upgrade, rollback, stopped-state preservation, config preservation, new-binary restart, recovery advice, no-op, JSON output")
     finally:
+        for installed, env, elsewhere, state in runtimes:
+            if state.exists() and json.loads(state.read_text()).get("control_socket"):
+                subprocess.run([str(installed), "stop"], env=env, cwd=elsewhere, capture_output=True, timeout=15)
         server.shutdown()
         server.server_close()
 

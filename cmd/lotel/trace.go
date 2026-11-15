@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -33,12 +34,7 @@ func traceCommand() *cobra.Command {
 			args[0] = strings.ToLower(args[0])
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
-			defer db.Close()
+		RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
 			tx, err := db.Begin()
 			if err != nil {
 				return err
@@ -71,7 +67,7 @@ func traceCommand() *cobra.Command {
 				}
 			}
 			return encoder.Encode(bundle)
-		},
+		}),
 	}
 	cmd.Flags().BoolVar(&relationships, "relationships", false, "resolve span parents and log references")
 	return cmd

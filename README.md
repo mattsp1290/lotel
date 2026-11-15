@@ -92,10 +92,10 @@ lotel health
 
 Configure your application's OpenTelemetry SDK to send OTLP to
 `localhost:4317` for gRPC or `http://localhost:4318` for HTTP. After the app
-emits telemetry, ingest it and query the service name that your app uses:
+emits telemetry, query the service name that your app uses. Lotel indexes new
+telemetry automatically while the Collector runs:
 
 ```bash
-lotel ingest
 lotel query traces --service my-app --since 10m
 lotel query metrics --service my-app --since 10m
 lotel query logs --service my-app --since 10m
@@ -105,7 +105,8 @@ lotel query otlp --signal metrics --service my-app --since 10m
 
 An empty JSON array means no matching records were found. It is not proof that
 the application worked. Check the service name, SDK exporters, sampling, and
-export interval, then ingest again after the SDK and Collector flush.
+export interval. Wait for the SDK, Collector, and automatic ingestion to flush.
+Use `lotel ingest` when you need an immediate catch-up.
 
 ## Verify an application with a coding agent
 
@@ -140,7 +141,7 @@ Give your agent a concrete task such as:
 
 > Start lotel and check its health. Run the checkout success and failed-payment
 > tests with service.name=checkout-dev against the local fake payment service.
-> Wait for telemetry to flush, then ingest it. Query only this test window.
+> Wait for telemetry to flush and appear in queries. Query only this test window.
 > Confirm that the checkout span has database and payment child spans, that the
 > duration metric has fresh points, and that a failed payment has an error span
 > and a useful log with the same trace ID. Treat missing telemetry as a failed
@@ -151,7 +152,6 @@ Give your agent a concrete task such as:
 The agent can use these commands after the test run:
 
 ```bash
-lotel ingest
 lotel query traces --service checkout-dev --since 10m --limit 100
 lotel query metrics --service checkout-dev --since 10m --limit 100
 lotel query logs --service checkout-dev --since 10m --limit 100
@@ -170,7 +170,7 @@ A ten-minute window is convenient for exploration but can mix results from befor
 queries exit 0 even when empty, so the agent must inspect the records and
 compare them against the expected spans, metrics, and logs.
 
-The feedback loop is **run, ingest, inspect, fix, rerun**. Local query results
+The feedback loop is **run, inspect, fix, rerun**. Local query results
 let the agent check whether a code change altered the real execution path.
 They can also expose missing instrumentation before the change reaches
 production. Review sensitive fields before giving query output to a remote
@@ -179,7 +179,8 @@ agent. The [content redaction examples](#genai) cover LLM message content.
 ## Build from source
 
 Building requires Make, Go 1.26 or later, CGO enabled, and a C/C++ toolchain
-for DuckDB. The default Collector backend requires Docker; the native backend does not.
+for DuckDB. Docker is required for the default backend. Native mode runs the
+bundled Collector without Docker.
 
 ```bash
 git clone https://github.com/mattsp1290/lotel.git
@@ -196,7 +197,7 @@ lotel --version
 | `lotel --version` | Show the executable version |
 | `lotel commands` | List registered commands and flags as JSON |
 | `lotel upgrade [--check] [--json] [--version vX.Y.Z]` | Check for or install a release |
-| `lotel start [--wait] [--config <path>]` | Start the OTel Collector container |
+| `lotel start [--wait] [--config <path>]` | Start the Docker Collector and automatic ingestion |
 | `lotel start --backend native [--wait]` | Start the bundled Collector without Docker, with automatic ingestion |
 | `lotel stop` | Stop the collector |
 | `lotel status` | Show collector status (JSON) |
@@ -453,7 +454,7 @@ Application → OTLP (gRPC :4317 / HTTP :4318)
 ## Data storage
 
 - **Raw**: JSONL files written by the collector to `~/.lotel/data/{traces,metrics,logs,profiles}/`
-- **Indexed**: DuckDB database at `~/.lotel/data/lotel.db` (populated by `lotel ingest`)
+- **Indexed**: DuckDB database at `~/.lotel/data/lotel.db`, updated automatically while lotel runs
 - **State**: Backend, container or process identity, and config at `~/.lotel/collector.state`
 - **Config**: Default config at `~/.lotel/collector-config.yaml` (auto-generated)
 
@@ -529,12 +530,27 @@ Stop an existing collector before changing backends. Docker remains the default.
 Both backends use the same raw files and database. Native mode translates file
 exporter paths under `/data` to the host data directory. Other paths and custom
 receiver ports stay as configured. Collector output goes to
-`~/.lotel/collector.log`. Native lifecycle control uses a private Unix socket.
+`~/.lotel/collector.log`. Both backends use a managed lotel process with a private
+Unix control socket. Docker mode adopts a matching running Collector without
+restarting it. Repeated starts keep the same runtime.
 
-Native mode ingests at startup, every two minutes, and after exporters flush
-during shutdown. Each pass releases DuckDB so separate CLI commands can query
-the database. An ingestion error goes to the Collector log and the next pass
-retries. Collection continues after ingestion errors.
+### Automatic ingestion
+
+Both backends ingest at startup, every two seconds by default, and after
+exporters flush during shutdown. Database operations use one process lock and
+release DuckDB after each command or ingestion pass. Concurrent queries, manual
+ingestion, rebuilds, and pruning wait for their turn. CLI database waits time
+out after 30 seconds. A background pass retries on the next interval.
+
+`lotel status` includes an `ingestion` object with `enabled`, `running`,
+`interval`, `last_success`, and `last_error`. The first successful pass sets
+`last_success`. An ingestion error appears in status and the Collector log.
+Collection continues after ingestion errors, including errors present at startup.
+`lotel start` accepts a ready Collector; `lotel start --wait` also waits for
+ingestion health and leaves collection running if that health check times out.
+`lotel health` fails while an
+enabled worker reports an error or is unavailable. A successful pass clears the
+error. Ingestion latency also includes SDK export and Collector batch delays.
 
 During shutdown, `stop` waits for exporter flush and final indexing. It retries
 temporary database locks for up to five seconds. If final indexing still fails,
@@ -542,7 +558,7 @@ the Collector stops and `stop` exits with an error. Raw JSONL remains available.
 Run `lotel ingest` after the database becomes available to index those records.
 
 Add this optional section to `./lotel-collector.yaml` to change automatic
-ingestion in native mode:
+ingestion for either backend:
 
 ```yaml
 ingestion:
@@ -552,14 +568,13 @@ ingestion:
 
 The interval must be a positive Go duration. Set `enabled: false` to disable
 all automatic ingestion, including startup and shutdown. The `ingestion`
-section is specific to native mode. Remove it before using the same config
-with Docker. Manual `lotel ingest` works with either backend.
+section belongs to lotel and is removed before the Collector reads its config.
+Manual `lotel ingest` works with either backend.
 
 ### Rebuild the index
 
-`lotel ingest --full` clears projected rows, complete OTLP envelopes, and
-ingestion cursors, then rereads retained JSONL for all four signals in one
-transaction. A read or storage error rolls the
+`lotel ingest --full` replaces indexed telemetry and resets ingestion progress,
+then rereads retained JSONL in one transaction. A read or storage error rolls the
 transaction back. Malformed records follow the normal ingestion rules and
 appear in the report. Raw files stay intact. Previously pruned rows return
 when their raw data remains. Indexed rows without retained raw data disappear.
@@ -590,10 +605,9 @@ export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=span_and_event
 opentelemetry-instrument python my_app.py
 ```
 
-After your app makes calls, ingest and query:
+After your app makes calls, query automatically indexed telemetry:
 
 ```bash
-lotel ingest
 lotel query genai calls --service my-llm-app --since 10m
 lotel query genai calls --service my-llm-app --since 10m --content
 lotel query genai usage --service my-llm-app --group-by provider,model
@@ -690,11 +704,11 @@ work. See [issue tracking setup and migration](docs/issue-tracking.md).
 
 ## Runtime requirements
 
+- Docker for the default backend. Native collection runs on macOS or Linux.
 - A supported Linux or macOS host. See [release platform requirements](docs/release.md).
-- Docker installed and running for the default backend. Native mode does not require Docker.
 
-Prebuilt installations do not require Go or a compiler. Source builds need the
-[build requirements](#build-from-source).
+Prebuilt installations do not require Go or a compiler. Source builds need Go
+1.26 or later and CGO for DuckDB. See the [build requirements](#build-from-source).
 
 ## License
 

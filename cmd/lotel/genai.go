@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"strings"
 
 	"github.com/mattsp1290/lotel/internal/storage"
@@ -14,17 +15,13 @@ func genAICommand() *cobra.Command {
 		var service, since, until, model, provider, operation, conversation, traceID, groupBy string
 		var limit int
 		var content, errorsOnly bool
-		cmd := &cobra.Command{Use: mode, Short: "Query GenAI " + mode + " (JSON)", RunE: func(cmd *cobra.Command, args []string) error {
+		cmd := &cobra.Command{Use: mode, Short: "Query GenAI " + mode + " (JSON)", RunE: withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
 			common, err := parseQueryOpts(service, since, until, limit)
 			if err != nil {
 				return err
 			}
 			common.TraceID = traceID
 			opts := storage.GenAIOptions{QueryOptions: common, Model: model, Provider: provider, Operation: operation, ConversationID: conversation, ErrorsOnly: errorsOnly, Content: content, GroupBy: strings.Split(groupBy, ",")}
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
 			if mode == "calls" {
 				rows, err := storage.QueryGenAICalls(db, opts)
 				if err != nil {
@@ -45,7 +42,7 @@ func genAICommand() *cobra.Command {
 				printJSON(rows)
 			}
 			return nil
-		}}
+		})}
 		f := cmd.Flags()
 		f.StringVar(&service, "service", "", "filter by service.name")
 		f.StringVar(&since, "since", "", "start time (RFC3339 or relative duration)")
