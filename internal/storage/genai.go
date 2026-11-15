@@ -107,10 +107,10 @@ func QueryGenAICalls(db *sql.DB, opts GenAIOptions) ([]GenAICall, error) {
 	if opts.Content {
 		columns = append(columns, "CAST(attributes AS VARCHAR)")
 	}
-	query := "SELECT " + strings.Join(columns, ",") + ` FROM traces LEFT JOIN (SELECT trace_id AS event_trace_id,span_id AS event_span_id,COUNT(*) AS n FROM logs WHERE starts_with(event_name,'gen_ai.') GROUP BY trace_id,span_id) e ON traces.trace_id=e.event_trace_id AND traces.span_id=e.event_span_id WHERE EXISTS(SELECT 1 FROM unnest(json_keys(attributes)) AS keys(k) WHERE starts_with(k,'gen_ai.'))`
+	query := "SELECT " + strings.Join(columns, ",") + ` FROM traces LEFT JOIN (SELECT lower(trace_id) AS event_trace_id,lower(span_id) AS event_span_id,COUNT(*) AS n FROM logs WHERE starts_with(event_name,'gen_ai.') GROUP BY lower(trace_id),lower(span_id)) e ON lower(traces.trace_id)=e.event_trace_id AND lower(traces.span_id)=e.event_span_id WHERE EXISTS(SELECT 1 FROM unnest(json_keys(attributes)) AS keys(k) WHERE starts_with(k,'gen_ai.'))`
 	args := buildWhere(&query, opts.QueryOptions, "start_time")
 	if opts.TraceID != "" {
-		query += " AND trace_id=?"
+		query += " AND lower(trace_id)=?"
 		args = append(args, strings.ToLower(opts.TraceID))
 	}
 	filters := []struct{ value, expr string }{
@@ -198,7 +198,7 @@ func QueryGenAICalls(db *sql.DB, opts GenAIOptions) ([]GenAICall, error) {
 			return nil, err
 		}
 		for i := range calls {
-			populateContent(&calls[i], contents[i], events[spanIdentity{calls[i].TraceID, calls[i].SpanID}])
+			populateContent(&calls[i], contents[i], events[normalizedSpanIdentity(calls[i].TraceID, calls[i].SpanID)])
 		}
 	}
 	return calls, nil
@@ -375,20 +375,25 @@ func QueryGenAIUsage(db *sql.DB, opts GenAIOptions) ([]GenAIUsageRow, error) {
 
 type spanIdentity struct{ traceID, spanID string }
 
+func normalizedSpanIdentity(traceID, spanID string) spanIdentity {
+	return spanIdentity{strings.ToLower(traceID), strings.ToLower(spanID)}
+}
+
 func queryContentEvents(db *sql.DB, calls []GenAICall) (map[spanIdentity][]LogResult, error) {
 	events := make(map[spanIdentity][]LogResult, len(calls))
 	traces := map[string]bool{}
 	var args []any
 	var placeholders []string
 	for _, call := range calls {
-		events[spanIdentity{call.TraceID, call.SpanID}] = nil
-		if !traces[call.TraceID] {
-			traces[call.TraceID] = true
+		identity := normalizedSpanIdentity(call.TraceID, call.SpanID)
+		events[identity] = nil
+		if !traces[identity.traceID] {
+			traces[identity.traceID] = true
 			placeholders = append(placeholders, "?")
-			args = append(args, call.TraceID)
+			args = append(args, identity.traceID)
 		}
 	}
-	query := `SELECT trace_id,span_id,CAST(attributes AS VARCHAR),CAST(body_json AS VARCHAR) FROM logs WHERE event_name='gen_ai.client.inference.operation.details' AND trace_id IN (` + strings.Join(placeholders, ",") + ") ORDER BY timestamp"
+	query := `SELECT trace_id,span_id,CAST(attributes AS VARCHAR),CAST(body_json AS VARCHAR) FROM logs WHERE event_name='gen_ai.client.inference.operation.details' AND span_id IS NOT NULL AND lower(trace_id) IN (` + strings.Join(placeholders, ",") + ") ORDER BY timestamp"
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -400,7 +405,7 @@ func queryContentEvents(db *sql.DB, calls []GenAICall) (map[spanIdentity][]LogRe
 		if err := rows.Scan(&log.TraceID, &log.SpanID, &attrs, &body); err != nil {
 			return nil, err
 		}
-		identity := spanIdentity{log.TraceID, log.SpanID}
+		identity := normalizedSpanIdentity(log.TraceID, log.SpanID)
 		if _, selected := events[identity]; !selected {
 			continue
 		}
