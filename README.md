@@ -211,6 +211,7 @@ lotel --version
 | `lotel query traces` | Query traces (JSON output) |
 | `lotel query page traces` | Page through a bounded trace snapshot |
 | `lotel query page logs` | Page through a bounded log snapshot |
+| `lotel output-schema query page traces` / `lotel output-schema query page logs` | Print a JSON Schema for a successful page result |
 | `lotel query span-stats` | Summarize observed spans by service, name, and kind |
 | `lotel query recent traces` / `lotel query recent logs` | Return a bounded newest-first snapshot |
 | `lotel query log-stats` | Summarize observed logs by service and severity |
@@ -362,6 +363,12 @@ The first request accepts `--service` and `--until`; continuation requests must
 not repeat filters or a limit. Records are ordered by projected timestamp and a
 stable row ID, newest first. A limit bounds the number of returned records, not
 the amount of work or the size of an individual record.
+
+Use `lotel output-schema query page traces` or `lotel output-schema query page
+logs` to retrieve the JSON Schema for a successful page result. These are
+JSON Schema draft 2020-12 documents. `--schema-version 1` selects the current
+schema version explicitly. Error output and other commands are not described.
+An unsupported command or version exits with an error.
 
 The first page adds a cursor capability to the local v3 index. Existing v3
 ingestion remains compatible. On a large index, the migration can hold the
