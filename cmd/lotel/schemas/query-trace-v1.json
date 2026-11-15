@@ -1,0 +1,263 @@
+{
+  "$id": "urn:lotel:output:query:trace:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "logs": {
+      "items": {
+        "properties": {
+          "attributes": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "body": {
+            "type": "string"
+          },
+          "body_value": {},
+          "event_name": {
+            "type": "string"
+          },
+          "flags": {
+            "type": "integer"
+          },
+          "observed_timestamp": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resource_attributes": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "scope_name": {
+            "type": "string"
+          },
+          "scope_version": {
+            "type": "string"
+          },
+          "service_name": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "severity_number": {
+            "type": "integer"
+          },
+          "span_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "timestamp",
+          "body",
+          "service_name"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "relationships": {
+      "properties": {
+        "cycle_span_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "log_spans": {
+          "items": {
+            "properties": {
+              "span_indices": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "span_parents": {
+          "items": {
+            "properties": {
+              "span_indices": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "span_parents",
+        "log_spans",
+        "cycle_span_indices"
+      ],
+      "type": "object"
+    },
+    "spans": {
+      "items": {
+        "properties": {
+          "attributes": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "duration_ns": {
+            "type": "integer"
+          },
+          "end_time": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "properties": {
+                "attributes": {
+                  "additionalProperties": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "time": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "time",
+                "name",
+                "attributes"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "integer"
+          },
+          "links": {
+            "items": {
+              "properties": {
+                "attributes": {
+                  "additionalProperties": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "span_id": {
+                  "type": "string"
+                },
+                "trace_id": {
+                  "type": "string"
+                },
+                "trace_state": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "trace_id",
+                "span_id",
+                "trace_state",
+                "attributes"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_span_id": {
+            "type": "string"
+          },
+          "resource_attributes": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "schema_url": {
+            "type": "string"
+          },
+          "scope_name": {
+            "type": "string"
+          },
+          "scope_version": {
+            "type": "string"
+          },
+          "service_name": {
+            "type": "string"
+          },
+          "span_id": {
+            "type": "string"
+          },
+          "start_time": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status_code": {
+            "type": "integer"
+          },
+          "status_message": {
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "trace_state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "trace_id",
+          "span_id",
+          "name",
+          "kind",
+          "start_time",
+          "end_time",
+          "duration_ns",
+          "status_code",
+          "service_name"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "trace_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "trace_id",
+    "spans",
+    "logs"
+  ],
+  "title": "lotel query trace stdout, version 1",
+  "type": "object"
+}

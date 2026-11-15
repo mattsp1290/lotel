@@ -1,0 +1,31 @@
+{
+  "$id": "urn:lotel:output:query:otlp:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "properties": {
+      "first_time_unix_nano": {
+        "type": "string"
+      },
+      "last_time_unix_nano": {
+        "type": "string"
+      },
+      "payload": {
+        "type": "object"
+      },
+      "service_name": {
+        "type": "string"
+      },
+      "signal": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "signal",
+      "service_name",
+      "payload"
+    ],
+    "type": "object"
+  },
+  "title": "lotel query otlp stdout, version 1",
+  "type": "array"
+}

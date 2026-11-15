@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -33,6 +34,7 @@ func TestDiagnoseSignalsCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing data: %v %s", err, out)
 	}
+	validateOutput(t, "diagnose signals", out)
 	var report storage.SignalDiagnosis
 	if err = json.Unmarshal(out, &report); err != nil || report.Observation != "unavailable" || report.Reason != "data_missing" {
 		t.Fatalf("report: %s %v", out, err)
@@ -74,6 +76,24 @@ func TestDiagnoseSignalsCLI(t *testing.T) {
 	}
 	if strings.Contains(string(out), "diagnose-signals-worker") {
 		t.Fatal("worker exposed in catalog")
+	}
+	path := filepath.Join(home, ".lotel", "data", "lotel.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.WithDB(context.Background(), path, func(db *sql.DB) error {
+		_, err := db.Exec(`INSERT INTO traces(trace_id,span_id,name,kind,start_time,end_time,duration_ns,status_code,service_name,date) VALUES ('trace','span','request',1,'2025-01-02 12:00:00','2025-01-02 12:00:00',0,0,'app','2025-01-02')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err = invoke("diagnose", "signals", "--service", "app", "--since", "2025-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("seeded diagnosis: %v %s", err, out)
+	}
+	validateOutput(t, "diagnose signals", out)
+	if err := json.Unmarshal(out, &report); err != nil || report.Observation != "available" || report.Signals[0].ObservedInWindow == nil || !*report.Signals[0].ObservedInWindow {
+		t.Fatalf("seeded report: %s %v", out, err)
 	}
 }
 

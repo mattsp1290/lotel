@@ -161,6 +161,14 @@ func TestMetricDifferenceCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query failed: %q %q %v", out, stderr, err)
 	}
+	validateOutput(t, "query metric-difference", []byte(out))
+	for _, args := range [][]string{{"query", "metrics"}, {"query", "otlp", "--signal", "metrics"}} {
+		data, stderr, err := schemaCLI(t, home, args...)
+		if err != nil {
+			t.Fatalf("query fixture: %v %s", err, stderr)
+		}
+		validateOutput(t, strings.Join(args[:2], " "), data)
+	}
 	var result storage.MetricDifference
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)

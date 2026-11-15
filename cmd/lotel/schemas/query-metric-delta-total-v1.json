@@ -1,0 +1,42 @@
+{
+  "$id": "urn:lotel:output:query:metric-delta-total:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "from_unix_nano": {
+      "pattern": "^[1-9][0-9]*$",
+      "type": "string"
+    },
+    "point_count": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "rate_per_second": {
+      "pattern": "^(0|[1-9][0-9]*)(/[1-9][0-9]*)?$",
+      "type": "string"
+    },
+    "to_unix_nano": {
+      "pattern": "^[1-9][0-9]*$",
+      "type": "string"
+    },
+    "total": {
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "from_unix_nano",
+    "to_unix_nano",
+    "total",
+    "rate_per_second",
+    "point_count",
+    "assumptions"
+  ],
+  "title": "lotel query metric-delta-total stdout, version 1",
+  "type": "object"
+}

@@ -1,0 +1,85 @@
+{
+  "$id": "urn:lotel:output:query:dependencies:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "edges": {
+      "items": {
+        "properties": {
+          "observed_calls": {
+            "type": "integer"
+          },
+          "source_namespace": {
+            "type": "string"
+          },
+          "source_service": {
+            "type": "string"
+          },
+          "target_namespace": {
+            "type": "string"
+          },
+          "target_service": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_namespace",
+          "source_service",
+          "target_namespace",
+          "target_service",
+          "observed_calls"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "exclusions": {
+      "properties": {
+        "duplicate_child": {
+          "type": "integer"
+        },
+        "duplicate_parent": {
+          "type": "integer"
+        },
+        "invalid_child_id": {
+          "type": "integer"
+        },
+        "invalid_parent_id": {
+          "type": "integer"
+        },
+        "invalid_service_identity": {
+          "type": "integer"
+        },
+        "missing_parent": {
+          "type": "integer"
+        },
+        "non_client_parent": {
+          "type": "integer"
+        },
+        "same_service": {
+          "type": "integer"
+        },
+        "unknown_service": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "invalid_child_id",
+        "duplicate_child",
+        "invalid_parent_id",
+        "missing_parent",
+        "duplicate_parent",
+        "invalid_service_identity",
+        "unknown_service",
+        "non_client_parent",
+        "same_service"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "edges",
+    "exclusions"
+  ],
+  "title": "lotel query dependencies stdout, version 1",
+  "type": "object"
+}

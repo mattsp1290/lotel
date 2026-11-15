@@ -1,0 +1,66 @@
+{
+  "$id": "urn:lotel:output:status:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "backend": {
+      "type": "string"
+    },
+    "config_path": {
+      "type": "string"
+    },
+    "container_id": {
+      "type": "string"
+    },
+    "container_name": {
+      "type": "string"
+    },
+    "healthy": {
+      "type": "boolean"
+    },
+    "image": {
+      "type": "string"
+    },
+    "ingestion": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "type": "string"
+        },
+        "last_error": {
+          "type": "string"
+        },
+        "last_success": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled",
+        "running",
+        "interval"
+      ],
+      "type": "object"
+    },
+    "pid": {
+      "type": "integer"
+    },
+    "running": {
+      "type": "boolean"
+    },
+    "uptime": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ingestion",
+    "running",
+    "healthy"
+  ],
+  "title": "lotel status stdout, version 1",
+  "type": "object"
+}

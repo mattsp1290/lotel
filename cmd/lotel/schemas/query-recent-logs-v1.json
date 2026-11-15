@@ -1,0 +1,90 @@
+{
+  "$id": "urn:lotel:output:query:recent:logs:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "records": {
+      "items": {
+        "properties": {
+          "attributes": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "body": {
+            "type": "string"
+          },
+          "body_value": {},
+          "event_name": {
+            "type": "string"
+          },
+          "flags": {
+            "type": "integer"
+          },
+          "observed_timestamp": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resource_attributes": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "scope_name": {
+            "type": "string"
+          },
+          "scope_version": {
+            "type": "string"
+          },
+          "service_name": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "severity_number": {
+            "type": "integer"
+          },
+          "span_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "timestamp",
+          "body",
+          "service_name"
+        ],
+        "type": "object"
+      },
+      "maxItems": 1000,
+      "type": "array"
+    },
+    "signal": {
+      "const": "logs"
+    },
+    "since": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "until": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "required": [
+    "signal",
+    "since",
+    "until",
+    "records",
+    "truncated"
+  ],
+  "title": "lotel query recent logs stdout, version 1",
+  "type": "object"
+}

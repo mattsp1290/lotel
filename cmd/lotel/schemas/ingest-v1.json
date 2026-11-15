@@ -1,0 +1,53 @@
+{
+  "$id": "urn:lotel:output:ingest:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "signals": {
+      "additionalProperties": {
+        "properties": {
+          "bytes": {
+            "type": "integer"
+          },
+          "files": {
+            "type": "integer"
+          },
+          "lines": {
+            "type": "integer"
+          },
+          "otlp_envelopes": {
+            "type": "integer"
+          },
+          "projection_skipped_lines": {
+            "type": "integer"
+          },
+          "records": {
+            "type": "integer"
+          },
+          "skipped_lines": {
+            "type": "integer"
+          },
+          "skipped_records": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "files",
+          "lines",
+          "records",
+          "skipped_lines",
+          "skipped_records",
+          "bytes",
+          "otlp_envelopes",
+          "projection_skipped_lines"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "signals"
+  ],
+  "title": "lotel ingest stdout, version 1",
+  "type": "object"
+}

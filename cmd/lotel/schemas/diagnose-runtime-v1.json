@@ -1,0 +1,130 @@
+{
+  "$id": "urn:lotel:output:diagnose:runtime:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "ingestion": {
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_error": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interval": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_success": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observation": {
+          "type": "string"
+        },
+        "running": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "observation",
+        "enabled",
+        "running",
+        "interval",
+        "last_success",
+        "has_error"
+      ],
+      "type": "object"
+    },
+    "runtime": {
+      "properties": {
+        "combined_healthy": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observation": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "running": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "observation",
+        "running",
+        "combined_healthy"
+      ],
+      "type": "object"
+    },
+    "state_file": {
+      "properties": {
+        "observation": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "observation"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "state_file",
+    "runtime",
+    "ingestion"
+  ],
+  "title": "lotel diagnose runtime stdout, version 1",
+  "type": "object"
+}

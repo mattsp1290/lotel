@@ -1,0 +1,31 @@
+{
+  "$id": "urn:lotel:output:query:aggregate:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "avg": {
+      "type": "number"
+    },
+    "count": {
+      "type": "integer"
+    },
+    "max": {
+      "type": "number"
+    },
+    "metric_name": {
+      "type": "string"
+    },
+    "min": {
+      "type": "number"
+    },
+    "service_name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "metric_name",
+    "service_name",
+    "count"
+  ],
+  "title": "lotel query aggregate stdout, version 1",
+  "type": "object"
+}

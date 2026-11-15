@@ -4,6 +4,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -73,7 +74,7 @@ func TestDockerInspectionDoesNotTreatFailedFallbackAsAbsent(t *testing.T) {
 }
 
 func TestRuntimeStatusAllowsSlowDockerInspection(t *testing.T) {
-	fakeInspectionDocker(t, "case \"$1\" in\ninspect) /bin/sleep 2.2; printf true;;\nstop|rm) exit 0;;\n*) exit 1;;\nesac\n")
+	fakeInspectionDocker(t, "case \"$1\" in\ninspect) /bin/sleep 1.2; printf true;;\nstop|rm) exit 0;;\n*) exit 1;;\nesac\n")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "collector.yaml")
 	if err := os.WriteFile(configPath, []byte("service: {}\n"), 0600); err != nil {
@@ -111,14 +112,52 @@ func TestRuntimeStatusAllowsSlowDockerInspection(t *testing.T) {
 	if err != nil || status == nil || !status.Running {
 		t.Fatalf("runtime status = %+v, %v", status, err)
 	}
+}
+
+func TestRuntimeClientsAllowSlowStatusResponse(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	dir, err := os.MkdirTemp("/tmp", "lotel-status-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "control.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := Status{Backend: "docker", PID: os.Getpid(), Running: true, Healthy: true}
+	response.Ingestion.Interval = "1s"
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/status" || r.Header.Get("Authorization") != "Bearer test-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		select {
+		case <-time.After(2200 * time.Millisecond):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		case <-r.Context().Done():
+		}
+	})}
+	go server.Serve(listener)
+	t.Cleanup(func() { server.Close() })
+	state := &State{Backend: "docker", PID: os.Getpid(), ControlSocket: socket, ControlToken: "test-token"}
 	if err := writeState(state); err != nil {
 		t.Fatal(err)
 	}
-	diagnosis := DiagnoseRuntime(t.Context())
-	if diagnosis.Runtime.Observation != "available" {
-		t.Fatalf("slow runtime diagnosis = %+v", diagnosis)
-	}
+	t.Run("status", func(t *testing.T) {
+		status, err := requestRuntimeStatus(t.Context(), state)
+		if err != nil || status == nil || !status.Running {
+			t.Fatalf("slow runtime status = %+v, %v", status, err)
+		}
+	})
+	t.Run("diagnosis", func(t *testing.T) {
+		diagnosis := DiagnoseRuntime(t.Context())
+		if diagnosis.Runtime.Observation != "available" {
+			t.Fatalf("slow runtime diagnosis = %+v", diagnosis)
+		}
+	})
 }
 
 func TestHealthProbeHonorsCancellation(t *testing.T) {

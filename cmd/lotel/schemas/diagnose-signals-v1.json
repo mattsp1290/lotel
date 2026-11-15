@@ -1,0 +1,74 @@
+{
+  "$id": "urn:lotel:output:diagnose:signals:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "observation": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "service": {
+      "type": "string"
+    },
+    "signals": {
+      "items": {
+        "properties": {
+          "latest_in_window": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_in_window": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "signal": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "signal",
+          "observed_in_window",
+          "latest_in_window"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "since": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "until": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "observation",
+    "service",
+    "since",
+    "until",
+    "signals"
+  ],
+  "title": "lotel diagnose signals stdout, version 1",
+  "type": "object"
+}

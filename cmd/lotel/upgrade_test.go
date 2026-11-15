@@ -116,6 +116,11 @@ func TestCollectorUpgradeLifecycle(t *testing.T) {
 				},
 			}
 			report, err := upgradeWithCollector(context.Background(), req, control, &notices)
+			data, marshalErr := json.Marshal(report)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			validateOutput(t, "upgrade", data)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err=%v", err)
 			}

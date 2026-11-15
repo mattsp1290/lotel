@@ -1,0 +1,88 @@
+{
+  "$id": "urn:lotel:output:query:genai:usage:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "properties": {
+      "cache_read_input_tokens": {
+        "type": "integer"
+      },
+      "cache_write_input_tokens": {
+        "type": "integer"
+      },
+      "calls": {
+        "type": "integer"
+      },
+      "calls_missing_usage": {
+        "type": "integer"
+      },
+      "conversation": {
+        "type": "string"
+      },
+      "duration_ms": {
+        "properties": {
+          "avg": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "p50": {
+            "type": "number"
+          },
+          "p95": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "avg",
+          "p50",
+          "p95",
+          "max"
+        ],
+        "type": "object"
+      },
+      "errors": {
+        "type": "integer"
+      },
+      "input_tokens": {
+        "type": "integer"
+      },
+      "model": {
+        "type": "string"
+      },
+      "operation": {
+        "type": "string"
+      },
+      "output_tokens": {
+        "type": "integer"
+      },
+      "provider": {
+        "type": "string"
+      },
+      "reasoning_output_tokens": {
+        "type": "integer"
+      },
+      "service": {
+        "type": "string"
+      },
+      "total_tokens": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "calls",
+      "errors",
+      "input_tokens",
+      "output_tokens",
+      "cache_read_input_tokens",
+      "cache_write_input_tokens",
+      "reasoning_output_tokens",
+      "calls_missing_usage",
+      "total_tokens",
+      "duration_ms"
+    ],
+    "type": "object"
+  },
+  "title": "lotel query genai usage stdout, version 1",
+  "type": "array"
+}

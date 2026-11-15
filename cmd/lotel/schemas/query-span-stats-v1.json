@@ -1,0 +1,74 @@
+{
+  "$id": "urn:lotel:output:query:span-stats:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "properties": {
+      "duration_count": {
+        "type": "integer"
+      },
+      "duration_excluded": {
+        "type": "integer"
+      },
+      "error_count": {
+        "type": "integer"
+      },
+      "error_rate": {
+        "type": "number"
+      },
+      "kind": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "name": {
+        "type": "string"
+      },
+      "p50_duration_ns": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "p95_duration_ns": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "service_name": {
+        "type": "string"
+      },
+      "span_count": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "service_name",
+      "name",
+      "kind",
+      "span_count",
+      "error_count",
+      "error_rate",
+      "duration_count",
+      "duration_excluded",
+      "p50_duration_ns",
+      "p95_duration_ns"
+    ],
+    "type": "object"
+  },
+  "title": "lotel query span-stats stdout, version 1",
+  "type": "array"
+}

@@ -1,0 +1,72 @@
+{
+  "$id": "urn:lotel:output:setup:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "candidates": {
+      "items": {
+        "properties": {
+          "ecosystem": {
+            "type": "string"
+          },
+          "guide": {
+            "type": "string"
+          },
+          "manifests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "manifests",
+          "guide"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "exporter_guide": {
+      "type": "string"
+    },
+    "guidance": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "skipped": {
+      "items": {
+        "properties": {
+          "manifest": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "manifest",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "path",
+    "candidates",
+    "skipped",
+    "exporter_guide",
+    "guidance"
+  ],
+  "title": "lotel setup stdout, version 1",
+  "type": "object"
+}
