@@ -32,7 +32,4 @@ logs/
 *.db
 *.db.wal
 
-# Beads cache
-.beads/.cache/
-
 .venv-it/

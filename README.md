@@ -255,6 +255,12 @@ The PEP 723 script has a committed dependency lock. Without `uv`, create
 `.venv-it`, install the dependencies listed in the script header, and run
 `.venv-it/bin/python scripts/genai_integration.py`.
 
+## Issue tracking
+
+This project uses `bn` (Beans), with issues stored in the shared hub at
+`~/.beans/hub`. Run `bn prime` for the agent workflow or `bn ready` for available
+work. See [issue tracking setup and migration](docs/issue-tracking.md).
+
 ## Requirements
 
 - Go 1.24+

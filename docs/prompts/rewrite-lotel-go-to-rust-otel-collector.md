@@ -1,4 +1,4 @@
-# Project Planning with Beads
+# Project Planning with Beans
 
 ## Agent Instructions
 
@@ -26,7 +26,7 @@ Support the feature set of https://github.com/open-telemetry/opentelemetry-colle
 
 ## Your Task
 
-Analyze this project and create a comprehensive **Beads task graph** using the `bd` CLI. Beads provides dependency-aware, conflict-free task management for multi-agent execution.
+Analyze this project and create a comprehensive **Beans task graph** using the `bn` CLI. Beans provides dependency-aware, conflict-free task management for multi-agent execution.
 
 ---
 
@@ -34,9 +34,9 @@ Analyze this project and create a comprehensive **Beads task graph** using the `
 
 Generate a shell script that creates the full task graph. The script should:
 
-1. **Initialize Beads** (if not already initialized)
-2. **Create all beads** with appropriate priorities
-3. **Establish dependencies** between beads
+1. **Verify the Beans hub** with `bn status` (initialize it once with `bn init <hub-remote>` if needed)
+2. **Create all issues** with appropriate priorities
+3. **Establish dependencies** between issues
 4. **Add labels** for phase grouping
 
 ### Example Output
@@ -48,54 +48,54 @@ Generate a shell script that creates the full task graph. The script should:
 
 set -e
 
-# Initialize beads if needed
-if [ ! -d ".beads" ]; then
-    bd init
-fi
+# The shared Beans hub must already be initialized with bn init <hub-remote>.
+# Verify hub access and repository-based project resolution.
+bn status --json
+bn prime
 
-echo "Creating project beads..."
+echo "Creating project issues..."
 
 # ========================================
 # Phase 1: Project Setup & Infrastructure
 # ========================================
 
-SETUP_VITE=$(bd create "Initialize project with Vite + React + TypeScript" -p 0 --label setup --silent)
+SETUP_VITE=$(bn create "Initialize project with Vite + React + TypeScript" -p 0 --label setup --silent)
 
-SETUP_LINT=$(bd create "Configure ESLint, Prettier, and TypeScript strict mode" -p 1 --label setup --silent)
-bd dep add $SETUP_LINT $SETUP_VITE
+SETUP_LINT=$(bn create "Configure ESLint, Prettier, and TypeScript strict mode" -p 1 --label setup --silent)
+bn dep add $SETUP_LINT $SETUP_VITE
 
-SETUP_TAILWIND=$(bd create "Set up Tailwind CSS with design system tokens" -p 1 --label setup --silent)
-bd dep add $SETUP_TAILWIND $SETUP_VITE
+SETUP_TAILWIND=$(bn create "Set up Tailwind CSS with design system tokens" -p 1 --label setup --silent)
+bn dep add $SETUP_TAILWIND $SETUP_VITE
 
-SETUP_TESTING=$(bd create "Configure testing framework (Vitest + Testing Library)" -p 1 --label setup --silent)
-bd dep add $SETUP_TESTING $SETUP_LINT
+SETUP_TESTING=$(bn create "Configure testing framework (Vitest + Testing Library)" -p 1 --label setup --silent)
+bn dep add $SETUP_TESTING $SETUP_LINT
 
 # ========================================
 # Phase 2: Core Architecture
 # ========================================
 
-API_CLIENT=$(bd create "Implement API client with error handling and retries" -p 0 --label core --silent)
-bd dep add $API_CLIENT $SETUP_VITE
+API_CLIENT=$(bn create "Implement API client with error handling and retries" -p 0 --label core --silent)
+bn dep add $API_CLIENT $SETUP_VITE
 
-STATE_MGMT=$(bd create "Set up global state management (Zustand/Jotai)" -p 0 --label core --silent)
-bd dep add $STATE_MGMT $SETUP_VITE
+STATE_MGMT=$(bn create "Set up global state management (Zustand/Jotai)" -p 0 --label core --silent)
+bn dep add $STATE_MGMT $SETUP_VITE
 
-AUTH_CONTEXT=$(bd create "Create authentication context and hooks" -p 0 --label core --silent)
-bd dep add $AUTH_CONTEXT $STATE_MGMT
-bd dep add $AUTH_CONTEXT $API_CLIENT
+AUTH_CONTEXT=$(bn create "Create authentication context and hooks" -p 0 --label core --silent)
+bn dep add $AUTH_CONTEXT $STATE_MGMT
+bn dep add $AUTH_CONTEXT $API_CLIENT
 
 # ... continue for all phases ...
 
 echo ""
-echo "Bead graph created! View with:"
-echo "  bv                    # Interactive TUI"
-echo "  bv --robot-triage     # AI-friendly recommendations"
-echo "  bd ready              # List unblocked tasks"
+echo "Issue graph created! View with:"
+echo "  bn serve              # Local issue board"
+echo "  bn ready --json       # Machine-readable ready work"
+echo "  bn ready              # List unblocked tasks"
 ```
 
 ---
 
-## Bead Creation Guidelines
+## Issue Creation Guidelines
 
 ### Priority Levels
 - `-p 0` = Critical (blocking other work)
@@ -104,7 +104,7 @@ echo "  bd ready              # List unblocked tasks"
 - `-p 3` = Low (nice to have)
 
 ### Labels (Phase Grouping)
-Use `--label` to group beads by phase:
+Use `--label` to group issues by phase:
 - `setup` - Project initialization
 - `core` - Core architecture
 - `auth` - Authentication/authorization
@@ -116,12 +116,12 @@ Use `--label` to group beads by phase:
 
 ### Dependency Rules
 1. Never create cycles
-2. Every bead should have a clear dependency chain back to setup tasks
-3. Use `bd dep add CHILD PARENT` (child depends on parent completing first)
+2. Every issue should have a clear dependency chain back to setup tasks
+3. Use `bn dep add CHILD PARENT` (child depends on parent completing first)
 4. Parallel work should share a common ancestor, not depend on each other
 
 ### Task Granularity
-- Each bead should be completable in **under 750 lines of code**
+- Each issue should be completable in **under 750 lines of code**
 - Tasks should be atomic enough for one agent to complete without coordination
 - If a task requires multiple file areas, consider splitting by file area
 
@@ -132,7 +132,7 @@ Use `--label` to group beads by phase:
 For each major work area, note the file patterns that will need exclusive reservation:
 
 ```bash
-# Example reservation notes (add as bead descriptions)
+# Example reservation notes (add as issue descriptions)
 # Auth work: src/auth/**, tests/auth/**, src/hooks/useAuth*
 # API client: src/api/**, src/lib/fetch*, tests/api/**
 # UI components: src/components/{ComponentName}/**, tests/components/{ComponentName}/**
@@ -142,15 +142,11 @@ This helps agents claim appropriate file surfaces when they start work.
 
 ---
 
-## Agent Mail Thread Convention
+## Agent coordination
 
-When beads are created, threads will be automatically created with pattern `bd-{id}`:
-
-| Thread Pattern | Purpose |
-|----------------|---------|
-| `bd-{id}` | Main work discussion |
-| `bd-{id}-review` | Code review |
-| `bd-{id}-blocked` | Blocker escalation |
+Claim work with `bn update <id> --claim`. Record progress with `bn note <id> "text"`.
+For ongoing agent discussions, use explicitly created `bn channel` conversations.
+Creating an issue does not automatically create a conversation.
 
 ---
 
@@ -168,10 +164,10 @@ Place any important context in `prompts/docs/` for agents to reference. This inc
 
 After generating the script:
 
-1. **Run it**: `chmod +x setup-beads.sh && ./setup-beads.sh`
-2. **Verify graph**: `bv --robot-insights` to check for cycles
-3. **Check ready work**: `bd ready` should show initial setup tasks
-4. **Review plan**: `bv --robot-plan` to see parallel tracks
+1. **Run it**: `chmod +x setup-beans.sh && ./setup-beans.sh`
+2. **Verify graph**: `bn dep cycles` to check for cycles
+3. **Check ready work**: `bn ready` should show initial setup tasks
+4. **Review plan**: `bn dep tree` to see parallel tracks
 
 ---
 

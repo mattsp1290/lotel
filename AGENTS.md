@@ -1,6 +1,8 @@
 # Agent Instructions
 
-This repo uses **bd** (beads) for issue tracking. Run `bd onboard` once before starting work.
+This repo uses **bn** (Beans) for issue tracking. Run `bn prime` before starting work.
+Issues live in the shared hub at `~/.beans/hub`, not in this repository.
+Run `bn status` to verify that the current repository resolves to project `lotel`.
 
 ## Mission
 
@@ -127,13 +129,19 @@ Example gate commands:
 - `scripts/genai_integration.py` - optional live OpenCode Go test
 - `scripts/verify.py` - end-to-end verification script
 
-## Issue tracking (bd)
+## Issue tracking (bn)
 
 ```bash
-bd ready       # Find available work
-bd show <id>   # View issue details
-bd close <id>  # Complete work
+bn ready                           # Find available work
+bn show <id>                       # View issue details
+bn update <id> --claim              # Claim work
+bn close <id> -r "Completed work"    # Complete work with a reason
+bn sync                            # Synchronize the shared hub
 ```
+
+Every mutating `bn` command commits and pushes the hub by default. Keep hub files
+out of lotel commits. Use `bn list --closed` to inspect migrated issue history.
+See [issue tracking](docs/issue-tracking.md) for setup and migration details.
 
 ## Quality gates
 
@@ -149,8 +157,8 @@ go build ./...
 When ending a session, do all of the following:
 
 1. Run quality gates: `go test ./... && go build ./...`
-2. Update issue status: `bd close <id>`
+2. Update issue status: `bn close <id> -r "Completed in <commit>"`
 3. Sync and push:
    ```bash
-   git pull --rebase && bd sync && git push
+   git pull --rebase && bn sync && git push
    ```

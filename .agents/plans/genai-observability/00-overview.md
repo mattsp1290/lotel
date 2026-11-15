@@ -185,7 +185,7 @@ No blocking decisions remain.
 Non-blocking:
 
 - **N1:** The default `LOTEL_IT_OPENCODE_MODEL` is `glm-5.3-flash`, a Chat Completions model from `/v1/models` on 2026-11-14. The model has `reasoning.supported: true`, so the live test uses `max_tokens=256` to leave room for reasoning. The implementer may substitute any model whose native API is chat completions if that one disappears. Owner: implementer.
-- **N2:** Issue tracker choice (`bd` vs `bn`) for follow-ups. Owner: user. This does not affect implementation.
+- **N2 (resolved 2026-11-15):** Follow-up work uses `bn`. See [migration details](../../../docs/issue-tracking.md).
 
 ## Document map
 
