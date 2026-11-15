@@ -1,6 +1,6 @@
 # GenAI observability for lotel — Overview
 
-Status: Implemented on the feature branch. Acceptance evidence and plan corrections are in [07](07-implementation-evidence.md). Review gauntlet pending.
+Status: Implemented on the feature branch. Acceptance evidence and plan corrections are in [07](07-implementation-evidence.md). Both review-gauntlet stages completed and pushed.
 
 ## Request
 

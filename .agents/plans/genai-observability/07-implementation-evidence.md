@@ -45,7 +45,36 @@ An unbounded `query genai usage` over that database returned seven groups in
 - Beads onboarding ran. `bd ready` reports no beads database; the plan explicitly
   treats tracker initialization as outside this implementation.
 
-## Review
+## Review and final acceptance
 
-The review gauntlet runs after the implementation commit. Its independently
-generated reports and fixer summaries are recorded under `reviews/`.
+The standard review is in
+`reviews/feat-genai-observability-2026-11-14-233556-0cc6f916c16f/`.
+Signal Integrity and Operational Maintainability both requested changes.
+The fixer resolved two Important findings reported by both reviewers and one
+suggestion, with no skipped or manual items. Checkpoint `a4068fa` was pushed
+and its remote SHA matched local HEAD.
+
+The thermonuclear review is in
+`reviews/feat-genai-observability-thermo-2026-11-14-234031-a4068fa284a1/`.
+It used the complete upstream rubric pinned to
+`bf0c7cd80abdbf7fe47b634978a7d1b4071f71a7`:
+https://raw.githubusercontent.com/cursor/plugins/bf0c7cd80abdbf7fe47b634978a7d1b4071f71a7/cursor-team-kit/skills/thermo-nuclear-code-quality-review/SKILL.md
+
+The fixer resolved two Important structural findings, with no skipped or manual
+items. Checkpoint `0f79304` was pushed and its remote SHA matched local HEAD.
+Review artifacts remain local under the repository's existing ignore convention.
+
+Final source validation passed:
+- `go test ./...`, `go build ./...`, `go vet ./...`, and `git diff --check`.
+- Deterministic collector E2E: 23 passed, 0 failed.
+- Live OpenCode test after both review fixes: 9 passed, 0 failed, 0 warnings.
+- Python compilation and missing-key SKIP.
+- Docker recipe validation and behavior tests.
+- Raw JSONL sentinel survived stop/start and was reported as a skipped line.
+- A different config path warned without changing the container ID.
+- README relative links resolved. Repository credential scan found no key.
+- Git pull reported already up to date.
+
+The installed Beads CLI has no `sync` command, and no repository beads database
+exists. No issue was available to close. The plan excludes tracker initialization
+from implementation, so Git push proceeds independently.
