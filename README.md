@@ -203,6 +203,7 @@ lotel --version
 | `lotel status` | Show collector status (JSON) |
 | `lotel health` | Check collector health (exit 0/1) |
 | `lotel diagnose runtime` | Inspect the recorded runtime and ingestion status without changing files |
+| `lotel diagnose signals` | Inspect indexed signal evidence without changing files |
 | `lotel ingest` | Incrementally ingest new JSONL telemetry (JSON report) |
 | `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
 | `lotel assert signal` | Fail if a service has no indexed signal in a time window |
@@ -257,6 +258,19 @@ running. An unavailable runtime leaves its running and health values unknown.
 Ingestion errors are reported as `has_error`; the report omits the error text,
 control socket, and token. It does not inspect an unmanaged Docker container
 or check whether any signal has reached the index.
+
+`lotel diagnose signals --service my-app --since 15m` reports the latest
+indexed trace, metric, and log timestamp in the inclusive window. It uses
+projected event timestamps at microsecond precision and does not inspect
+profiles. An absent match is not proof that the application or collection
+failed. Unavailable data is reported as unknown, not as an absent match.
+
+The command opens an existing database in read-only mode under its existing
+lock. It does not create the database or lock, or migrate the schema. It
+rejects database paths containing `?`, `#`, or `%`, and it bounds the time
+spent in a separate worker. It assumes the private data directory and its
+entries are not concurrently replaced. DuckDB opens the database by pathname,
+so identity checks cannot rule out a replacement at the instant of open.
 
 ## Query options
 
