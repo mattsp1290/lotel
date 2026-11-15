@@ -356,7 +356,7 @@ func main() {
 	pruneCmd.Flags().BoolVar(&pruneAll, "all", false, "delete all telemetry data")
 
 	rootCmd.AddCommand(nativeRunCommand())
-	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, pruneCmd, upgradeCommand())
+	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, assertCommand(), pruneCmd, upgradeCommand())
 
 	ctx := context.Background()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
