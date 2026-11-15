@@ -168,6 +168,7 @@ func TestDependenciesRejectNonStringIdentityAttributes(t *testing.T) {
 	type identity struct{ name, namespace map[string]any }
 	text := func(value string) map[string]any { return map[string]any{"stringValue": value} }
 	number := map[string]any{"intValue": "42"}
+	null := map[string]any{}
 	pairs := []struct{ source, target identity }{
 		{identity{number, nil}, identity{text("target"), nil}},
 		{identity{text("source"), nil}, identity{number, nil}},
@@ -175,7 +176,11 @@ func TestDependenciesRejectNonStringIdentityAttributes(t *testing.T) {
 		{identity{text("source"), nil}, identity{text("target"), number}},
 		{identity{text("42"), nil}, identity{text("target"), nil}},
 		{identity{text("source"), nil}, identity{text("target"), text("42")}},
-		{identity{text("source"), map[string]any{}}, identity{text("target"), nil}},
+		{identity{text("source"), text("")}, identity{text("target"), nil}},
+		{identity{null, nil}, identity{text("target"), nil}},
+		{identity{text("source"), nil}, identity{null, nil}},
+		{identity{text("source"), null}, identity{text("target"), nil}},
+		{identity{text("source"), nil}, identity{text("target"), null}},
 	}
 	var resources []any
 	for i, pair := range pairs {
@@ -224,7 +229,7 @@ func TestDependenciesRejectNonStringIdentityAttributes(t *testing.T) {
 	if !reflect.DeepEqual(report.Edges, want) {
 		t.Fatalf("edges: %+v, exclusions: %+v", report.Edges, report.Exclusions)
 	}
-	if report.Exclusions.InvalidServiceIdentity != 4 {
+	if report.Exclusions != (DependencyExclusions{InvalidServiceIdentity: 8}) {
 		t.Fatalf("exclusions: %+v", report.Exclusions)
 	}
 }

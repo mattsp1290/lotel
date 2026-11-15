@@ -279,7 +279,8 @@ can be either a real name or the ingestion fallback, so both are excluded. SDK
 fallback names `unknown_service` and `unknown_service:<executable>` are also
 excluded, even when used as a literal service name.
 The report excludes identity attributes that the projection identifies as
-non-string values. Some OTLP values, including bytes and special floating-point
+non-string values, including explicit JSON null. A missing namespace remains
+equivalent to an empty string. Some OTLP values, including bytes and special floating-point
 values, project as strings, so their original types cannot always be identified.
 Legacy spans without projected resource attributes use their stored service name.
 Sampling, missing instrumentation, retention, and ingestion delays can hide
