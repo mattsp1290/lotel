@@ -158,14 +158,23 @@ func main() {
 		Use:   "traces",
 		Short: "Query traces (JSON output)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
 			opts, err := parseCommandQueryOpts(cmd, service, since, until, limit)
 			if err != nil {
 				return err
 			}
+			opts.ErrorsOnly, _ = cmd.Flags().GetBool("errors-only")
+			if cmd.Flags().Changed("min-duration") {
+				duration, _ := cmd.Flags().GetDuration("min-duration")
+				if duration < 0 {
+					return fmt.Errorf("--min-duration must be nonnegative")
+				}
+				opts.MinDuration = &duration
+			}
+			db, err := openDB()
+			if err != nil {
+				return err
+			}
+			defer db.Close()
 			results, err := storage.QueryTraces(db, opts)
 			if err != nil {
 				return err
@@ -264,6 +273,8 @@ func main() {
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd} {
 		cmd.Flags().String("name", "", "exact span or metric name")
 	}
+	queryTracesCmd.Flags().Bool("errors-only", false, "filter spans with OpenTelemetry error status")
+	queryTracesCmd.Flags().Duration("min-duration", 0, "minimum span duration (inclusive, e.g. 100ms)")
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryLogsCmd} {
 		cmd.Flags().String("trace-id", "", "trace ID (lowercase hex)")
 	}

@@ -230,6 +230,7 @@ Additional filters:
 | --- | --- |
 | `--name` | `traces` (span name), `metrics` (metric name) |
 | `--trace-id` | `traces`, `logs`, `genai calls`, `genai usage` |
+| `--errors-only`, `--min-duration` | `traces` |
 | `--event-name` | `logs` |
 | `--attr key=value` | `traces`, `metrics`, `logs`; repeat to require all matches |
 | `--model`, `--provider`, `--operation`, `--conversation-id`, `--errors-only` | Both GenAI commands |
@@ -240,6 +241,12 @@ Attribute filters compare the compact JSON string form. An integer 12 matches
 `--attr key=12`. A stored double 1.0 matches `key=1`, not `key=1.0`.
 A double 1e21 matches `key=1e21`. Null and missing values never match.
 Structured values match their compact JSON text.
+
+For traces, `--errors-only` matches the OpenTelemetry span status ERROR. It does
+not infer errors from HTTP status or exceptions. `--min-duration` accepts a
+nonnegative Go duration such as `100ms` and includes spans at the threshold.
+It compares the projected nanosecond duration. Spans with missing timestamps
+have a projected duration of zero.
 
 Generic queries order oldest first. `genai calls` orders newest first.
 Usage defaults to grouping by provider, model, and operation. It reports token
