@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,7 +12,6 @@ import (
 )
 
 var errAssertionFailed = errors.New("no matching signal")
-var assertionTimestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$`)
 
 type signalAssertionResult struct {
 	Passed          bool       `json:"passed"`
@@ -23,40 +20,6 @@ type signalAssertionResult struct {
 	Since           time.Time  `json:"since"`
 	Until           time.Time  `json:"until"`
 	LatestTimestamp *time.Time `json:"latest_timestamp,omitempty"`
-}
-
-func parseAssertionTimestamp(value string) (time.Time, error) {
-	if !assertionTimestampPattern.MatchString(value) {
-		return time.Time{}, fmt.Errorf("expected RFC3339 timestamp with at most nine fractional digits")
-	}
-	return time.Parse(time.RFC3339Nano, value)
-}
-
-func assertionSince(value string, now time.Time) (time.Time, error) {
-	if t, err := parseAssertionTimestamp(value); err == nil {
-		return t.UTC(), nil
-	}
-	var duration time.Duration
-	var err error
-	if strings.HasSuffix(value, "d") {
-		days := strings.TrimSuffix(value, "d")
-		if days == "" || strings.Trim(days, "0123456789") != "" {
-			return time.Time{}, fmt.Errorf("invalid duration")
-		}
-		var n int64
-		n, err = strconv.ParseInt(days, 10, 64)
-		if err == nil && n <= int64((1<<63-1)/int64(24*time.Hour)) {
-			duration = time.Duration(n) * 24 * time.Hour
-		} else {
-			err = fmt.Errorf("invalid duration")
-		}
-	} else {
-		duration, err = time.ParseDuration(value)
-	}
-	if err != nil || duration <= 0 {
-		return time.Time{}, fmt.Errorf("expected an RFC3339 timestamp or positive duration")
-	}
-	return now.Add(-duration), nil
 }
 
 func assertCommand() *cobra.Command {
@@ -72,19 +35,11 @@ func assertCommand() *cobra.Command {
 			if strings.TrimSpace(service) == "" {
 				return fmt.Errorf("--service must be nonempty")
 			}
-			start, err := assertionSince(since, now)
+			start, end, err := resolveBoundedWindow(since, until, cmd.Flags().Changed("until"), now)
 			if err != nil {
-				return fmt.Errorf("invalid --since: %w", err)
+				return err
 			}
-			end := now
-			if cmd.Flags().Changed("until") {
-				end, err = parseAssertionTimestamp(until)
-				if err != nil {
-					return fmt.Errorf("invalid --until: %w", err)
-				}
-				end = end.UTC()
-			}
-			if start.IsZero() || end.IsZero() || end.After(now) || start.After(end) {
+			if !validBoundedWindow(start, end, now) {
 				return fmt.Errorf("assertion window must end no later than now and not precede --since")
 			}
 			db, err := openDB()

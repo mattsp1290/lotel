@@ -291,8 +291,11 @@ For cumulative histograms, read the latest `query metrics --name <name>` point.
 `lotel query span-stats --since 15m` groups projected spans by service, name,
 and span kind. The start is required and can be a positive duration or an RFC3339
 timestamp. The end defaults to the time of the query; `--until` accepts an
-RFC3339 timestamp. Both bounds are inclusive. `--service` filters before grouping,
-and `--limit` limits the sorted groups after aggregation.
+RFC3339 timestamp no later than that time. Both bounds are inclusive and match
+the projected span start time, which is stored at microsecond precision. For
+example, a span starting at `12:00:00.0000002` is stored at `12:00:00.000000`
+and does not match a window starting at `12:00:00.0000002`. `--service` filters
+before grouping, and `--limit` limits the sorted groups after aggregation.
 
 Each group reports the number of spans, the number with OpenTelemetry ERROR
 status, and their error rate over all spans in the group, including spans with

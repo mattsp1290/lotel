@@ -123,3 +123,41 @@ func TestSpanStatsNullProjection(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectedSpanWindowsAgree(t *testing.T) {
+	dir := t.TempDir()
+	db, err := OpenDB(filepath.Join(dir, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	base := time.Unix(1700000000, 0).UTC()
+	actual := base.Add(200 * time.Nanosecond)
+	path := filepath.Join(dir, "data", "traces")
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"app"}}]},"scopeSpans":[{"spans":[{"traceId":"11111111111111111111111111111111","spanId":"1111111111111111","name":"request","startTimeUnixNano":"%d","endTimeUnixNano":"%d"}]}]}]}`+"\n", actual.UnixNano(), actual.Add(time.Microsecond).UnixNano())
+	if err := os.WriteFile(filepath.Join(path, "traces.jsonl"), []byte(payload), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := IngestAll(db, filepath.Join(dir, "data")); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		want bool
+	}{{"projected instant", base, true}, {"original instant", actual, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			latest, err := LatestSignal(db, SignalAssertion{Signal: "traces", Service: "app", Since: tc.at, Until: tc.at})
+			if err != nil || (latest != nil) != tc.want {
+				t.Fatalf("assertion latest = %v, err = %v", latest, err)
+			}
+			rows, err := QuerySpanStats(db, SpanStatsOptions{Service: "app", Since: tc.at, Until: tc.at})
+			if err != nil || (len(rows) != 0) != tc.want {
+				t.Fatalf("span statistics = %+v, err = %v", rows, err)
+			}
+		})
+	}
+}

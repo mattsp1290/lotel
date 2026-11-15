@@ -16,19 +16,11 @@ func spanStatsCommand() *cobra.Command {
 		Use: "span-stats", Short: "Summarize observed spans (JSON output)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			now := time.Now().UTC()
-			start, err := assertionSince(since, now)
+			start, end, err := resolveBoundedWindow(since, until, cmd.Flags().Changed("until"), now)
 			if err != nil {
-				return fmt.Errorf("invalid --since: %w", err)
+				return err
 			}
-			end := now
-			if cmd.Flags().Changed("until") {
-				end, err = parseAssertionTimestamp(until)
-				if err != nil {
-					return fmt.Errorf("invalid --until: %w", err)
-				}
-				end = end.UTC()
-			}
-			if start.IsZero() || end.IsZero() || end.After(now) || start.After(end) || limit < 0 {
+			if !validBoundedWindow(start, end, now) || limit < 0 {
 				return fmt.Errorf("invalid span statistics window or limit")
 			}
 			db, err := openDB()

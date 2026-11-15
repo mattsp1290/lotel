@@ -29,11 +29,7 @@ func LatestSignal(db *sql.DB, opts SignalAssertion) (*time.Time, error) {
 		return nil, fmt.Errorf("invalid signal assertion window or service")
 	}
 	query := fmt.Sprintf("SELECT MAX(%s) FROM %s WHERE service_name = ? AND %s >= ? AND %s <= ?", column, table, column, column)
-	start := opts.Since.Truncate(time.Microsecond)
-	if start.Before(opts.Since) {
-		start = start.Add(time.Microsecond)
-	}
-	end := opts.Until.Truncate(time.Microsecond)
+	start, end := projectedWindow(opts.Since, opts.Until)
 	var latest sql.NullTime
 	if err := db.QueryRow(query, opts.Service, start, end).Scan(&latest); err != nil {
 		return nil, fmt.Errorf("querying signal evidence: %w", err)

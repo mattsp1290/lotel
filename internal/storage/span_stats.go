@@ -30,11 +30,7 @@ func QuerySpanStats(db *sql.DB, opts SpanStatsOptions) ([]SpanStats, error) {
 	if opts.Since.IsZero() || opts.Until.IsZero() || opts.Since.After(opts.Until) || opts.Limit < 0 {
 		return nil, fmt.Errorf("invalid span statistics window or limit")
 	}
-	start := opts.Since.Truncate(time.Microsecond)
-	if start.Before(opts.Since) {
-		start = start.Add(time.Microsecond)
-	}
-	end := opts.Until.Truncate(time.Microsecond)
+	start, end := projectedWindow(opts.Since, opts.Until)
 	query := `WITH matched AS (
 		SELECT service_name, name, kind, status_code, duration_ns,
 			start_time <> TIMESTAMP '0001-01-01 00:00:00' AND end_time <> TIMESTAMP '0001-01-01 00:00:00' AND duration_ns >= 0 AS valid_duration
