@@ -358,6 +358,7 @@ func main() {
 	var catalog commandCatalog
 	rootCmd.AddCommand(nativeRunCommand())
 	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, assertCommand(), pruneCmd, upgradeCommand(), commandsCommand(&catalog))
+	rootCmd.InitDefaultVersionFlag()
 	catalog = buildCommandCatalog(rootCmd, version)
 
 	ctx := context.Background()

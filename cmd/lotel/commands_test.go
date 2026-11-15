@@ -68,7 +68,7 @@ func TestCommandsCLI(t *testing.T) {
 		t.Fatalf("invalid catalog: %s", first)
 	}
 	paths := make([]string, 0, len(catalog.Commands))
-	var trace *catalogCommand
+	var root, trace *catalogCommand
 	for i := range catalog.Commands {
 		entry := &catalog.Commands[i]
 		paths = append(paths, entry.Path)
@@ -81,9 +81,26 @@ func TestCommandsCLI(t *testing.T) {
 		if entry.Path == "lotel query traces" {
 			trace = entry
 		}
+		if entry.Path == "lotel" {
+			root = entry
+		}
+		for _, flag := range entry.Flags {
+			if flag.Name == "help" {
+				t.Fatalf("generated help flag appeared in %s", entry.Path)
+			}
+		}
 	}
-	if !sort.StringsAreSorted(paths) || trace == nil || !trace.Runnable {
+	if !sort.StringsAreSorted(paths) || root == nil || trace == nil || !trace.Runnable {
 		t.Fatalf("missing trace query or unsorted paths: %v", paths)
+	}
+	versionFound := false
+	for _, flag := range root.Flags {
+		if flag.Name == "version" && flag.Shorthand == "v" && flag.Type == "bool" && flag.Default == "false" && !flag.Inherited {
+			versionFound = true
+		}
+	}
+	if !versionFound {
+		t.Fatalf("missing root version flag: %+v", root.Flags)
 	}
 	found := false
 	for _, flag := range trace.Flags {
