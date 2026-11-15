@@ -84,3 +84,31 @@ func TestWithDBSerializesProcessesAndReleasesAfterError(t *testing.T) {
 		t.Fatalf("database stayed locked after callback error: %v", err)
 	}
 }
+
+func TestDuckDBCancellationReleasesDatabaseLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	outer, cancelOuter := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelOuter()
+	err := WithDB(outer, path, func(db *sql.DB) error {
+		ctx, cancel := context.WithTimeout(outer, 100*time.Millisecond)
+		defer cancel()
+		started := time.Now()
+		var x float64
+		err := db.QueryRowContext(ctx, `SELECT sum(sin(i)) FROM range(1000000000000) t(i)`).Scan(&x)
+		if err == nil || ctx.Err() == nil {
+			t.Errorf("heavy query did not cancel: %v", err)
+		}
+		if time.Since(started) > 3*time.Second {
+			t.Errorf("query did not promptly stop: %v", time.Since(started))
+		}
+		return err
+	})
+	if err == nil {
+		t.Fatal("expected interrupted query")
+	}
+	acquire, cancelAcquire := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelAcquire()
+	if err := WithDB(acquire, path, func(db *sql.DB) error { return db.PingContext(acquire) }); err != nil {
+		t.Fatalf("lock not released: %v", err)
+	}
+}

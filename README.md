@@ -223,6 +223,7 @@ lotel --version
 | `lotel query genai calls` | Query model, agent, and tool calls |
 | `lotel query genai usage` | Group token usage, errors, and latency |
 | `lotel query aggregate` | Compute avg/min/max for a metric |
+| `lotel query metric-difference` | Compare two exact retained cumulative integer sum points |
 | `lotel prune` | Delete telemetry older than threshold |
 
 `lotel commands` returns a versioned catalog of registered visible commands and
@@ -268,6 +269,52 @@ window. It does not prove the application or Collector failed. Allow time for
 export and ingestion, and use `lotel status` and `lotel health` for collection
 status. Historical assertions do not require a running Collector.
 
+## Compare retained metric points
+
+`query metric-difference` compares two exact timestamped points in one retained
+cumulative monotonic integer sum. Save an OTLP JSON selector containing exactly
+one resource, one scope, one metric, and one data point. Its resource, scope,
+metric name and unit, and point attributes identify the stream. The selector's
+point value and timestamps do not select the endpoints. For example:
+
+```json
+{"resourceMetrics":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"my-app"}}]},"scopeMetrics":[{"scope":{"name":"my-sdk"},"metrics":[{"name":"requests","unit":"1","sum":{"aggregationTemporality":2,"isMonotonic":true,"dataPoints":[{"attributes":[]}]}}]}]}]}
+```
+
+Use exact unsigned Unix nanoseconds from the retained OTLP points:
+
+```bash
+lotel query metric-difference --selector selector.json --from-ns 1700000000000000001 --to-ns 1700000000000000002
+```
+
+The result contains decimal strings for the difference and elapsed nanoseconds.
+The command scans all retained metric envelopes. It returns an error when the
+selected points are missing, duplicated, flagged, reset, decreasing, or not
+integer values, or when a later point declares an overlapping cumulative epoch.
+It also rejects unsupported or ambiguous identity data, and
+conflicting metric types or temporalities with the same resource, scope, name,
+unit, and matching point attributes. Dropped resource or scope attributes and resource entity references
+are unsupported. The result is an observed pair difference, not a rate or a
+complete-window total. It assumes a single writer. Ingestion or retention can
+leave history incomplete, including missing resets or missing-value markers.
+Results use retained envelopes only. Ingestion canonicalizes top-level JSON objects;
+duplicate top-level resourceMetrics fields can lose earlier values. Full backfill
+repeats that loss and cannot recover or detect it.
+The selector is limited to 4 MiB. The scan stops with an indeterminate error
+after 100,000 envelopes, 4 MiB in one envelope, 64 MiB of
+envelope data, 100,000 points across all streams, or one million JSON tokens.
+Every retained metrics envelope must decode completely. Unknown or malformed
+protobuf fields, malformed attributes, and unsupported enum values or resource
+entity references anywhere make the result indeterminate, even in unrelated
+streams. This does not validate every semantic rule for unrelated metric values.
+The database materializes the bounded payload scan (up to 64 MiB of payload plus
+query and decoding overhead); metadata and payload each require a table scan.
+The metadata limit bounds matching rows, with database vector read-ahead; it does
+not bound scanning unrelated rows. The command uses a 30-second context
+for selection and database work; DuckDB execution is interruptible. Cancellation
+is cooperative during JSON scanning and validation. An individual protobuf decode
+is size-bounded but cannot be interrupted mid-decode, and database open/close and
+selector file I/O may also extend beyond the deadline.
 `lotel diagnose runtime` reads the recorded runtime state and requests its
 status without creating files or opening the database. A missing state file
 means no runtime is recorded. The state must be a regular file, not a symbolic
@@ -306,7 +353,7 @@ Each result describes one database query. Ingestion, pruning, or rebuilding can
 change a later result. This command does not provide a continuation cursor.
 The limit bounds returned records, not the work needed to search the database.
 
-Query commands accept different filters. Most support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`. The single-trace query has no time or service filters, and dependency discovery accepts only `--since` and `--until`:
+Query commands accept different filters. Most support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`. The single-trace query has no time or service filters. Dependency discovery accepts only `--since` and `--until`. Metric difference uses a selector and exact nanosecond timestamps:
 
 ```
 --service     Filter by service.name
