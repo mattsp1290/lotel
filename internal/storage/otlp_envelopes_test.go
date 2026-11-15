@@ -243,7 +243,7 @@ func TestOTLPV2UpgradePreservesDataAndPruneHistory(t *testing.T) {
 	if _, err = IngestAll(db, root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`DELETE FROM logs; DROP TABLE otlp_envelopes; ALTER TABLE ingest_state DROP COLUMN raw_byte_offset; ALTER TABLE logs ALTER COLUMN flags TYPE INTEGER; UPDATE schema_meta SET value='2'`); err != nil {
+	if _, err = db.Exec(`DELETE FROM logs; DROP TABLE otlp_envelopes; ALTER TABLE logs ALTER COLUMN flags TYPE INTEGER; UPDATE schema_meta SET value='2'`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -259,9 +259,9 @@ func TestOTLPV2UpgradePreservesDataAndPruneHistory(t *testing.T) {
 	if err != nil || len(retained) != 1 || retained[0].MetricName != "retained" {
 		t.Fatalf("v2 data changed %v %+v", err, retained)
 	}
-	var offset, rawOffset int64
-	if err = db.QueryRow(`SELECT byte_offset,raw_byte_offset FROM ingest_state WHERE path=?`, source).Scan(&offset, &rawOffset); err != nil || offset != int64(len(payload)) || rawOffset != offset {
-		t.Fatalf("cursor changed %d %d %v", offset, rawOffset, err)
+	var offset int64
+	if err = db.QueryRow(`SELECT byte_offset FROM ingest_state WHERE path=?`, source).Scan(&offset); err != nil || offset != int64(len(payload)) {
+		t.Fatalf("cursor changed %d %v", offset, err)
 	}
 	report, err := IngestAll(db, root)
 	if err != nil {
@@ -286,6 +286,63 @@ func TestOTLPV2UpgradePreservesDataAndPruneHistory(t *testing.T) {
 	logs, err := QueryLogs(db, QueryOptions{})
 	if err != nil || len(logs) != 1 || logs[0].Body != "new" {
 		t.Fatalf("projection prune history lost %v %+v", err, logs)
+	}
+}
+
+func TestOTLPV3UnusedCursorColumnDoesNotReplay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := OpenDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE ingest_state ADD COLUMN raw_byte_offset BIGINT DEFAULT 0`); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	payload := `{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"1794700000000000001","body":{"stringValue":"old"}}]}]}]}` + "\n"
+	source := writeOTLPSignal(t, root, "logs", payload)
+	if _, err := IngestAll(db, root); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db, err = OpenDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	report, err := IngestAll(db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Signals["logs"].Records != 0 || report.Signals["logs"].OTLPEnvelopes != 0 {
+		t.Fatal("unused legacy cursor replayed ingested history")
+	}
+	file, err := os.OpenFile(source, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(strings.ReplaceAll(payload, "old", "new")); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	file.Close()
+	if _, err := IngestAll(db, root); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := QueryOTLP(db, "logs", QueryOptions{})
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("legacy schema changed ingestion %v %+v", err, rows)
+	}
+	logs, err := QueryLogs(db, QueryOptions{})
+	if err != nil || len(logs) != 2 {
+		t.Fatalf("legacy schema changed projections %v %+v", err, logs)
+	}
+	bodies := map[string]bool{}
+	for _, log := range logs {
+		bodies[log.Body] = true
+	}
+	if !bodies["old"] || !bodies["new"] {
+		t.Fatalf("legacy schema changed projected bodies %+v", logs)
 	}
 }
 

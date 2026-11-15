@@ -174,8 +174,7 @@ func migrate(db *sql.DB) error {
    byte_offset BIGINT,
    fingerprint VARCHAR,
    fingerprint_len INTEGER,
-   updated_at TIMESTAMP,
-   raw_byte_offset BIGINT DEFAULT 0
+   updated_at TIMESTAMP
   )`,
 		`CREATE TABLE IF NOT EXISTS otlp_envelopes (
             signal VARCHAR NOT NULL,
@@ -191,12 +190,6 @@ func migrate(db *sql.DB) error {
 		}
 	}
 	if version == 2 {
-		if _, err := tx.Exec(`ALTER TABLE ingest_state ADD COLUMN raw_byte_offset BIGINT DEFAULT 0`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`UPDATE ingest_state SET raw_byte_offset=byte_offset`); err != nil {
-			return err
-		}
 		if _, err := tx.Exec(`ALTER TABLE logs ALTER COLUMN flags TYPE BIGINT`); err != nil {
 			return err
 		}

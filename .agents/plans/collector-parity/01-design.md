@@ -26,13 +26,13 @@ references without changing the stored payload. Time bounds select overlapping
 resource ranges. They return complete envelopes and never rewrite sample or
 datapoint arrays. Undated envelopes have null timestamp indexes.
 
-Ingestion commits the complete payload, supported projections, and both cursors
-in one file transaction. Unsupported projection decoding has a distinct report
-count. Database failures roll back rows and offsets together.
+Ingestion commits the complete payload, supported projections, and one file
+cursor in a transaction. Unsupported projection decoding has a distinct report
+count. Database failures roll back rows and progress together.
 
-Schema v3 upgrades v2 additively. Existing rows and projection offsets remain.
-The new OTLP cursor starts at the existing offset so old pruned data does not
-reappear automatically. Complete OTLP history begins with new ingestion.
+Schema v3 upgrades v2 additively. Existing rows and file offsets remain.
+Complete OTLP storage uses the existing file position, so old pruned data does
+not reappear automatically. Complete OTLP history begins with new ingestion.
 
 Prune reports distinguish projected records from complete OTLP envelopes.
 Age-based retention keeps an envelope until its latest timestamp is old.

@@ -74,10 +74,10 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 		return err
 	}
 	defer tx.Rollback()
-	var offset, rawOffset int64
+	var offset int64
 	var previous string
 	var previousLen int
-	err = tx.QueryRow("SELECT byte_offset,fingerprint,fingerprint_len,raw_byte_offset FROM ingest_state WHERE path=?", path).Scan(&offset, &previous, &previousLen, &rawOffset)
+	err = tx.QueryRow("SELECT byte_offset,fingerprint,fingerprint_len FROM ingest_state WHERE path=?", path).Scan(&offset, &previous, &previousLen)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
@@ -85,14 +85,14 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 		offset = 0
 	} else {
 		if offset > stat.Size() || int64(previousLen) > stat.Size() {
-			offset, rawOffset = 0, 0
+			offset = 0
 		} else {
 			fingerprint, err := fileFingerprint(f, previousLen)
 			if err != nil {
 				return err
 			}
 			if fingerprint != previous {
-				offset, rawOffset = 0, 0
+				offset = 0
 			}
 		}
 	}
@@ -101,8 +101,7 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 	if err != nil {
 		return err
 	}
-	readOffset := min(offset, rawOffset)
-	if _, err := f.Seek(readOffset, io.SeekStart); err != nil {
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return err
 	}
 	reader := bufio.NewReaderSize(f, 1<<20)
@@ -117,7 +116,7 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 	}
 	var consumed int64
 	// Restrict this transaction to the file size observed above.
-	remaining := stat.Size() - readOffset
+	remaining := stat.Size() - offset
 	for remaining > 0 {
 		line, err := reader.ReadBytes('\n')
 		if err == io.EOF {
@@ -137,17 +136,11 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 			rep.SkippedLines++
 			continue
 		}
-		lineEnd := readOffset + consumed
-		if lineEnd > rawOffset {
-			for _, envelope := range envelopes {
-				if _, err := tx.Exec(`INSERT INTO otlp_envelopes VALUES (?,?,CAST(? AS UBIGINT),CAST(? AS UBIGINT),?)`, signal, envelope.ServiceName, nullableNano(envelope.FirstTimeUnixNano), nullableNano(envelope.LastTimeUnixNano), string(envelope.Payload)); err != nil {
-					return fmt.Errorf("inserting OTLP envelope: %w", err)
-				}
-				rep.OTLPEnvelopes++
+		for _, envelope := range envelopes {
+			if _, err := tx.Exec(`INSERT INTO otlp_envelopes VALUES (?,?,CAST(? AS UBIGINT),CAST(? AS UBIGINT),?)`, signal, envelope.ServiceName, nullableNano(envelope.FirstTimeUnixNano), nullableNano(envelope.LastTimeUnixNano), string(envelope.Payload)); err != nil {
+				return fmt.Errorf("inserting OTLP envelope: %w", err)
 			}
-		}
-		if lineEnd <= offset {
-			continue
+			rep.OTLPEnvelopes++
 		}
 		if signal == "profiles" {
 			rep.Records += countProfileRecords(envelopes)
@@ -172,7 +165,7 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 			rep.SkippedRecords += skipped
 		}
 	}
-	_, err = tx.Exec("INSERT INTO ingest_state (path,byte_offset,fingerprint,fingerprint_len,updated_at,raw_byte_offset) VALUES (?,?,?,?,CURRENT_TIMESTAMP,?) ON CONFLICT(path) DO UPDATE SET byte_offset=excluded.byte_offset,fingerprint=excluded.fingerprint,fingerprint_len=excluded.fingerprint_len,updated_at=excluded.updated_at,raw_byte_offset=excluded.raw_byte_offset", path, readOffset+consumed, fingerprint, length, readOffset+consumed)
+	_, err = tx.Exec("INSERT INTO ingest_state (path,byte_offset,fingerprint,fingerprint_len,updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(path) DO UPDATE SET byte_offset=excluded.byte_offset,fingerprint=excluded.fingerprint,fingerprint_len=excluded.fingerprint_len,updated_at=excluded.updated_at", path, offset+consumed, fingerprint, length)
 	if err != nil {
 		return err
 	}

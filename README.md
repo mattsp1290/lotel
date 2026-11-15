@@ -163,8 +163,9 @@ Application → OTLP (gRPC :4317 / HTTP :4318)
 - **Config**: Default config at `~/.lotel/collector-config.yaml` (auto-generated)
 
 Schema v3 adds complete OTLP resource envelopes alongside the existing query
-projections. `ingest_state` tracks projection and OTLP byte offsets plus a file
-fingerprint per JSONL file. Repeated ingestion reads only complete new lines.
+projections. `ingest_state` tracks one byte offset and file fingerprint per
+JSONL file. Payloads, projections, and progress commit atomically. Repeated
+ingestion reads only complete new lines.
 Malformed lines and skipped projection records appear in the ingest report.
 `otlp_envelopes` counts preserved resource envelopes separately from projected
 records. A skipped projection does not imply that its OTLP payload was lost.
