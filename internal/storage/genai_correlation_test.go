@@ -16,9 +16,9 @@ func TestGenAIMixedCaseIngestedCorrelation(t *testing.T) {
 		"logs": `{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"mixed-case"}}]},"scopeLogs":[{"logRecords":[
 			{"timeUnixNano":"1700000000000000000","eventName":"gen_ai.client.inference.operation.details","traceId":"abcdef0123456789abcdef0123456789","spanId":"abcdef0123456789","attributes":[{"key":"gen_ai.input.messages","value":{"stringValue":"first"}}]},
 			{"timeUnixNano":"1700000000000001000","eventName":"gen_ai.client.inference.operation.details","traceId":"ABCDEF0123456789ABCDEF0123456789","spanId":"AbCdEf0123456789","attributes":[{"key":"gen_ai.output.messages","value":{"stringValue":"second"}}]},
-			{"timeUnixNano":"1700000000000002000","eventName":"gen_ai.client.inference.operation.details","traceId":"abcdef0123456789abcdef0123456789","attributes":[{"key":"gen_ai.input.messages","value":{"stringValue":"unscoped"}}]},
-			{"timeUnixNano":"1700000000000003000","eventName":"gen_ai.client.inference.operation.details","traceId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","spanId":"abcdef0123456789","attributes":[{"key":"gen_ai.input.messages","value":{"stringValue":"wrong trace"}}]},
-			{"timeUnixNano":"1700000000000004000","eventName":"gen_ai.client.inference.operation.details","traceId":"abcdef0123456789abcdef0123456789","spanId":"bbbbbbbbbbbbbbbb","attributes":[{"key":"gen_ai.input.messages","value":{"stringValue":"wrong span"}}]}
+			{"timeUnixNano":"1700000000000002000","eventName":"gen_ai.client.inference.operation.details","traceId":"abcdef0123456789abcdef0123456789","attributes":[{"key":"gen_ai.tool.definitions","value":{"stringValue":"unscoped"}}]},
+			{"timeUnixNano":"1700000000000003000","eventName":"gen_ai.client.inference.operation.details","traceId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","spanId":"abcdef0123456789","attributes":[{"key":"gen_ai.tool.call.arguments","value":{"stringValue":"wrong trace"}}]},
+			{"timeUnixNano":"1700000000000004000","eventName":"gen_ai.client.inference.operation.details","traceId":"abcdef0123456789abcdef0123456789","spanId":"bbbbbbbbbbbbbbbb","attributes":[{"key":"gen_ai.tool.call.result","value":{"stringValue":"wrong span"}}]}
 		]}]}]}`,
 	}
 	for signal, data := range inputs {
@@ -69,6 +69,9 @@ func TestGenAIMixedCaseIngestedCorrelation(t *testing.T) {
 		if calls[0].EventCount != 2 || calls[0].InputMessages != "first" || calls[0].OutputMessages != "second" || calls[0].ContentSource != "event" {
 			t.Fatalf("content correlation: %+v", calls[0])
 		}
+		if calls[0].ToolDefinitions != nil || calls[0].ToolCallArguments != nil || calls[0].ToolCallResult != nil {
+			t.Fatalf("content leaked from unrelated events: %+v", calls[0])
+		}
 	})
 	t.Run("duplicate span records remain separate", func(t *testing.T) {
 		if _, err := db.Exec("INSERT INTO traces SELECT * FROM traces"); err != nil {
@@ -81,6 +84,9 @@ func TestGenAIMixedCaseIngestedCorrelation(t *testing.T) {
 		for _, call := range calls {
 			if call.EventCount != 2 || call.InputMessages != "first" || call.OutputMessages != "second" {
 				t.Fatalf("duplicate span lost correlation: %+v", call)
+			}
+			if call.ToolDefinitions != nil || call.ToolCallArguments != nil || call.ToolCallResult != nil {
+				t.Fatalf("content leaked from unrelated events: %+v", call)
 			}
 		}
 	})
