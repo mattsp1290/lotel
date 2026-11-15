@@ -29,7 +29,7 @@ type SignalReport struct {
 // IngestAll incrementally ingests complete JSONL lines in per-file transactions.
 func IngestAll(db *sql.DB, dataPath string) (*IngestReport, error) {
 	report := &IngestReport{Signals: map[string]*SignalReport{}}
-	for _, signal := range []string{"traces", "metrics", "logs"} {
+	for _, signal := range ingestSignals {
 		rep := &SignalReport{}
 		report.Signals[signal] = rep
 		path, err := filepath.Abs(filepath.Join(dataPath, signal, signal+".jsonl"))
@@ -53,7 +53,21 @@ func fileFingerprint(f *os.File, length int) (string, error) {
 	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
 }
 
+var ingestSignals = []string{"traces", "metrics", "logs"}
+
 func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := ingestFileTx(tx, signal, path, rep); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func ingestFileTx(tx *sql.Tx, signal, path string, rep *SignalReport) error {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -66,11 +80,6 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 	if err != nil {
 		return err
 	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	var offset int64
 	var previous string
 	var previousLen int
@@ -152,9 +161,6 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 	}
 	_, err = tx.Exec("INSERT INTO ingest_state VALUES (?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(path) DO UPDATE SET byte_offset=excluded.byte_offset,fingerprint=excluded.fingerprint,fingerprint_len=excluded.fingerprint_len,updated_at=excluded.updated_at", path, offset+consumed, fingerprint, length)
 	if err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
 		return err
 	}
 	rep.Bytes = consumed
