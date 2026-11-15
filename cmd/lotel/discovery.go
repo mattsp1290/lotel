@@ -18,6 +18,9 @@ func discoveryCommand(name string) *cobra.Command {
 				return err
 			}
 			discoveryOpts := storage.DiscoveryOptions{Service: opts.Service, Since: opts.Since, Until: opts.Until, Limit: opts.Limit}
+			if err := discoveryOpts.Validate(); err != nil {
+				return err
+			}
 			db, err := openDB()
 			if err != nil {
 				return err

@@ -120,3 +120,18 @@ func TestDiscoveryFromIngestedTelemetry(t *testing.T) {
 		t.Fatalf("empty operations %#v, %v", ops, err)
 	}
 }
+
+func TestDiscoveryRejectsInvalidBounds(t *testing.T) {
+	now := time.Now()
+	for _, opts := range []DiscoveryOptions{
+		{Limit: -1},
+		{Since: now, Until: now.Add(-time.Second)},
+	} {
+		if _, err := QueryServices(nil, opts); err == nil {
+			t.Errorf("services accepted %+v", opts)
+		}
+		if _, err := QueryOperations(nil, opts); err == nil {
+			t.Errorf("operations accepted %+v", opts)
+		}
+	}
+}

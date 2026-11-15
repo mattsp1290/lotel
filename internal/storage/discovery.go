@@ -2,10 +2,10 @@ package storage
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
+
+	duckdb "github.com/marcboeker/go-duckdb"
 )
 
 type DiscoveryOptions struct {
@@ -13,6 +13,16 @@ type DiscoveryOptions struct {
 	Since   time.Time
 	Until   time.Time
 	Limit   int
+}
+
+func (opts DiscoveryOptions) Validate() error {
+	if opts.Limit < 0 {
+		return fmt.Errorf("limit cannot be negative")
+	}
+	if !opts.Since.IsZero() && !opts.Until.IsZero() && opts.Since.After(opts.Until) {
+		return fmt.Errorf("since must not be after until")
+	}
+	return nil
 }
 
 func (opts DiscoveryOptions) queryOptions() QueryOptions {
@@ -31,18 +41,16 @@ type OperationResult struct {
 }
 
 func QueryServices(db *sql.DB, opts DiscoveryOptions) ([]ServiceResult, error) {
-	var parts []string
-	var args []any
-	for _, source := range []struct{ table, time, signal string }{
-		{"traces", "start_time", "traces"},
-		{"metrics", "timestamp", "metrics"},
-		{"logs", "timestamp", "logs"},
-	} {
-		part := fmt.Sprintf("SELECT service_name, '%s' AS signal FROM %s WHERE 1=1", source.signal, source.table)
-		args = append(args, buildWhere(&part, opts.queryOptions(), source.time)...)
-		parts = append(parts, part)
+	if err := opts.Validate(); err != nil {
+		return nil, err
 	}
-	query := "SELECT service_name, CAST(to_json(list(DISTINCT signal ORDER BY signal)) AS VARCHAR) FROM (" + strings.Join(parts, " UNION ALL ") + ") observed GROUP BY service_name ORDER BY service_name"
+	query := `SELECT service_name, list(DISTINCT signal ORDER BY signal) FROM (
+		SELECT service_name, start_time AS observed_at, 'traces' AS signal FROM traces
+		UNION ALL SELECT service_name, timestamp AS observed_at, 'metrics' AS signal FROM metrics
+		UNION ALL SELECT service_name, timestamp AS observed_at, 'logs' AS signal FROM logs
+	) observed WHERE 1=1`
+	args := buildWhere(&query, opts.queryOptions(), "observed_at")
+	query += " GROUP BY service_name ORDER BY service_name"
 	if opts.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
 	}
@@ -54,19 +62,20 @@ func QueryServices(db *sql.DB, opts DiscoveryOptions) ([]ServiceResult, error) {
 	results := []ServiceResult{}
 	for rows.Next() {
 		var result ServiceResult
-		var signals string
+		var signals duckdb.Composite[[]string]
 		if err := rows.Scan(&result.ServiceName, &signals); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal([]byte(signals), &result.Signals); err != nil {
-			return nil, err
-		}
+		result.Signals = signals.Get()
 		results = append(results, result)
 	}
 	return results, rows.Err()
 }
 
 func QueryOperations(db *sql.DB, opts DiscoveryOptions) ([]OperationResult, error) {
+	if err := opts.Validate(); err != nil {
+		return nil, err
+	}
 	query := "SELECT DISTINCT service_name, name, kind FROM traces WHERE 1=1"
 	args := buildWhere(&query, opts.queryOptions(), "start_time")
 	query += " ORDER BY service_name, name, kind"
