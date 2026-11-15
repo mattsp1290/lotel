@@ -17,5 +17,6 @@ func diagnoseCommand() *cobra.Command {
 			return encoder.Encode(collector.DiagnoseRuntime(cmd.Context()))
 		},
 	})
+	parent.AddCommand(signalDiagnosisCommand())
 	return parent
 }

@@ -250,7 +250,7 @@ func main() {
 	pruneCmd := pruneCommand()
 
 	var catalog commandCatalog
-	rootCmd.AddCommand(runtimeRunCommand())
+	rootCmd.AddCommand(runtimeRunCommand(), signalDiagnosisWorkerCommand())
 	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, assertCommand(), pruneCmd, upgradeCommand(), diagnoseCommand(), commandsCommand(&catalog))
 	rootCmd.InitDefaultVersionFlag()
 	catalog = buildCommandCatalog(rootCmd, version)
