@@ -1,0 +1,149 @@
+{
+  "$id": "urn:lotel:output:query:genai:calls:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "properties": {
+      "agent_name": {
+        "type": "string"
+      },
+      "cache_read_input_tokens": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "cache_write_input_tokens": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "content_source": {
+        "type": "string"
+      },
+      "conversation_id": {
+        "type": "string"
+      },
+      "duration_ms": {
+        "type": "number"
+      },
+      "error_type": {
+        "type": "string"
+      },
+      "event_count": {
+        "type": "integer"
+      },
+      "finish_reasons": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "input_messages": {},
+      "input_tokens": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "operation": {
+        "type": "string"
+      },
+      "output_messages": {},
+      "output_tokens": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "parent_span_id": {
+        "type": "string"
+      },
+      "provider": {
+        "type": "string"
+      },
+      "reasoning_output_tokens": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "request_model": {
+        "type": "string"
+      },
+      "response_id": {
+        "type": "string"
+      },
+      "response_model": {
+        "type": "string"
+      },
+      "service_name": {
+        "type": "string"
+      },
+      "span_id": {
+        "type": "string"
+      },
+      "span_name": {
+        "type": "string"
+      },
+      "start_time": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "status_code": {
+        "type": "integer"
+      },
+      "system_instructions": {},
+      "tool_call_arguments": {},
+      "tool_call_result": {},
+      "tool_definitions": {},
+      "tool_name": {
+        "type": "string"
+      },
+      "trace_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "trace_id",
+      "span_id",
+      "span_name",
+      "service_name",
+      "start_time",
+      "duration_ms",
+      "status_code",
+      "event_count",
+      "operation",
+      "provider",
+      "request_model",
+      "input_tokens",
+      "output_tokens",
+      "cache_read_input_tokens",
+      "cache_write_input_tokens",
+      "reasoning_output_tokens"
+    ],
+    "type": "object"
+  },
+  "title": "lotel query genai calls stdout, version 1",
+  "type": "array"
+}

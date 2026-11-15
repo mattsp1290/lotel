@@ -1,0 +1,81 @@
+{
+  "$id": "urn:lotel:output:commands:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "commands": {
+      "items": {
+        "properties": {
+          "flags": {
+            "items": {
+              "properties": {
+                "default": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "inherited": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "shorthand": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "shorthand",
+                "type",
+                "default",
+                "description",
+                "inherited"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "path": {
+            "type": "string"
+          },
+          "runnable": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "usage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "usage",
+          "summary",
+          "runnable",
+          "flags"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "version",
+    "commands"
+  ],
+  "title": "lotel commands stdout, version 1",
+  "type": "object"
+}

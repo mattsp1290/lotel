@@ -1,0 +1,38 @@
+{
+  "$id": "urn:lotel:output:upgrade:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "collector_restarted": {
+      "type": "boolean"
+    },
+    "current": {
+      "type": "string"
+    },
+    "latest": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "update_available": {
+      "type": "boolean"
+    },
+    "upgraded": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "current",
+    "latest",
+    "target",
+    "path",
+    "update_available",
+    "upgraded",
+    "collector_restarted"
+  ],
+  "title": "lotel upgrade stdout, version 1",
+  "type": "object"
+}

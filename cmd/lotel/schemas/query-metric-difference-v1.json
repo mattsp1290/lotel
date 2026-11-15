@@ -1,0 +1,42 @@
+{
+  "$id": "urn:lotel:output:query:metric-difference:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "difference": {
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "elapsed_nanoseconds": {
+      "pattern": "^[1-9][0-9]*$",
+      "type": "string"
+    },
+    "from_unix_nano": {
+      "pattern": "^[1-9][0-9]*$",
+      "type": "string"
+    },
+    "rate_per_second": {
+      "pattern": "^(0|[1-9][0-9]*)(/[1-9][0-9]*)?$",
+      "type": "string"
+    },
+    "to_unix_nano": {
+      "pattern": "^[1-9][0-9]*$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "from_unix_nano",
+    "to_unix_nano",
+    "difference",
+    "rate_per_second",
+    "elapsed_nanoseconds",
+    "assumptions"
+  ],
+  "title": "lotel query metric-difference stdout, version 1",
+  "type": "object"
+}

@@ -1,0 +1,25 @@
+{
+  "$id": "urn:lotel:output:query:operations:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "properties": {
+      "kind": {
+        "type": "integer"
+      },
+      "name": {
+        "type": "string"
+      },
+      "service_name": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "service_name",
+      "name",
+      "kind"
+    ],
+    "type": "object"
+  },
+  "title": "lotel query operations stdout, version 1",
+  "type": "array"
+}

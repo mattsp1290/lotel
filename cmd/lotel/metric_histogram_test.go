@@ -62,6 +62,7 @@ func TestMetricHistogramCLI(t *testing.T) {
 			if err != nil {
 				t.Fatalf("query failed: %q %q %v", out, stderr, err)
 			}
+			validateOutput(t, "query "+tc.command, []byte(out))
 			var got storage.MetricHistogram
 			if err := json.Unmarshal([]byte(out), &got); err != nil || got.Count != tc.count || got.PointCount != 2 || !slices.Equal(got.BucketCounts, tc.buckets) || got.Basis != tc.basis || !strings.Contains(got.ValidationScope, "Sum, min and max are ignored") {
 				t.Fatalf("unexpected result: %q %v", out, err)

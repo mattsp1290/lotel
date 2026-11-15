@@ -1,0 +1,36 @@
+{
+  "$id": "urn:lotel:output:assert:signal:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "latest_timestamp": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "service": {
+      "type": "string"
+    },
+    "signal": {
+      "type": "string"
+    },
+    "since": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "until": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "required": [
+    "passed",
+    "signal",
+    "service",
+    "since",
+    "until"
+  ],
+  "title": "lotel assert signal stdout, version 1",
+  "type": "object"
+}

@@ -1,0 +1,63 @@
+{
+  "$id": "urn:lotel:output:query:logs:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "properties": {
+      "attributes": {
+        "additionalProperties": {},
+        "type": "object"
+      },
+      "body": {
+        "type": "string"
+      },
+      "body_value": {},
+      "event_name": {
+        "type": "string"
+      },
+      "flags": {
+        "type": "integer"
+      },
+      "observed_timestamp": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "resource_attributes": {
+        "additionalProperties": {},
+        "type": "object"
+      },
+      "scope_name": {
+        "type": "string"
+      },
+      "scope_version": {
+        "type": "string"
+      },
+      "service_name": {
+        "type": "string"
+      },
+      "severity": {
+        "type": "string"
+      },
+      "severity_number": {
+        "type": "integer"
+      },
+      "span_id": {
+        "type": "string"
+      },
+      "timestamp": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "trace_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "timestamp",
+      "body",
+      "service_name"
+    ],
+    "type": "object"
+  },
+  "title": "lotel query logs stdout, version 1",
+  "type": "array"
+}

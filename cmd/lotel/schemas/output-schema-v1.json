@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lotel:output:output-schema:1",
+  "title": "lotel output-schema stdout, version 1",
+  "$ref": "https://json-schema.org/draft/2020-12/schema"
+}

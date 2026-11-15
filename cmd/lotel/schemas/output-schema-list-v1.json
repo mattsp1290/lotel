@@ -1,0 +1,74 @@
+{
+  "$id": "urn:lotel:output:output-schema:--list:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "errors": {
+      "properties": {
+        "format": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "schema_supported": {
+          "type": "boolean"
+        },
+        "stream": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "schema_supported",
+        "stream",
+        "note"
+      ],
+      "type": "object"
+    },
+    "outputs": {
+      "items": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "schema_id": {
+            "type": "string"
+          },
+          "schema_supported": {
+            "type": "boolean"
+          },
+          "schema_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command",
+          "schema_supported",
+          "format"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "outputs",
+    "errors"
+  ],
+  "title": "lotel output-schema --list stdout, version 1",
+  "type": "object"
+}

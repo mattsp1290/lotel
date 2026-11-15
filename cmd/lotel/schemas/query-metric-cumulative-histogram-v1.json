@@ -1,0 +1,63 @@
+{
+  "$id": "urn:lotel:output:query:metric-cumulative-histogram:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "basis": {
+      "const": "cumulative_bucket_count_difference",
+      "type": "string"
+    },
+    "bounds": {
+      "items": {
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "bucket_counts": {
+      "items": {
+        "pattern": "^(0|[1-9][0-9]*)$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "count": {
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "from_unix_nano": {
+      "pattern": "^[1-9][0-9]*$",
+      "type": "string"
+    },
+    "point_count": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "to_unix_nano": {
+      "pattern": "^[1-9][0-9]*$",
+      "type": "string"
+    },
+    "validation_scope": {
+      "const": "Reported counts, explicit bounds and bucket counts only. Sum, min and max are ignored.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "from_unix_nano",
+    "to_unix_nano",
+    "basis",
+    "validation_scope",
+    "count",
+    "bounds",
+    "bucket_counts",
+    "point_count",
+    "assumptions"
+  ],
+  "title": "lotel query metric-cumulative-histogram stdout, version 1",
+  "type": "object"
+}

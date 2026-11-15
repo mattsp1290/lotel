@@ -211,7 +211,7 @@ lotel --version
 | `lotel query traces` | Query traces (JSON output) |
 | `lotel query page traces` | Page through a bounded trace snapshot |
 | `lotel query page logs` | Page through a bounded log snapshot |
-| `lotel output-schema query page traces` / `lotel output-schema query page logs` | Print a JSON Schema for a successful page result |
+| `lotel output-schema COMMAND...` / `lotel output-schema --list` | Print a versioned JSON Schema or discover command output and error formats |
 | `lotel query span-stats` | Summarize observed spans by service, name, and kind |
 | `lotel query recent traces` / `lotel query recent logs` | Return a bounded newest-first snapshot |
 | `lotel query log-stats` | Summarize observed logs by service and severity |
@@ -424,10 +424,40 @@ stable row ID, newest first. A limit bounds the number of returned records, not
 the amount of work or the size of an individual record.
 
 Use `lotel output-schema query page traces` or `lotel output-schema query page
-logs` to retrieve the JSON Schema for a successful page result. These are
-JSON Schema draft 2020-12 documents. `--schema-version 1` selects the current
-schema version explicitly. Error output and other commands are not described.
+logs` to retrieve the JSON Schema for a page result. All public commands with
+structured JSON stdout have version 1 schemas, including query projections,
+GenAI queries, discovery, diagnostics, ingestion, pruning, setup, assertions,
+status, and `upgrade --json`. The schemas use JSON Schema draft 2020-12.
+`--schema-version 1` selects the contract version explicitly. Schema versions
+are independent of the lotel release version and the database schema version.
+An incompatible output contract requires a new schema version and `$id`.
+Optional fields can be absent. Nullable fields explicitly accept `null`.
+Attributes and GenAI content can contain arbitrary JSON values. OTLP payloads
+retain their original JSON structure.
+
+`lotel output-schema --list` lists each output format, schema support, version,
+and `$id`. It also describes conditions such as `upgrade --json` and marks
+`start`, `stop`, `health`, and command-group help as text without JSON schemas. Help, version, and
+shell completion output are text. Hidden runtime commands are internal and
+have no public output contract. To retrieve the discovery result's own schema,
+use `lotel output-schema -- output-schema --list`. To retrieve the JSON Schema
+for schema documents themselves, use `lotel output-schema output-schema`.
+Schema discovery does not create telemetry state or open the database.
 An unsupported command or version exits with an error.
+
+There is no JSON error protocol or error schema. Cobra errors and usage text go
+to stderr. Check the process exit status separately from stdout. A failed
+`assert signal` still returns its JSON result and suppresses Cobra error and usage
+text. A stopped
+Collector makes `status` return its JSON result with exit status 1. An
+`upgrade --json` error can also include a JSON report. `health` writes its text
+result to stdout. Commands can write diagnostic text to stderr at any exit status.
+The `errors` entry in `output-schema --list` publishes these limits.
+
+Maintainers can regenerate the type-based schemas explicitly with
+`LOTEL_UPDATE_OUTPUT_SCHEMAS=1 go test ./cmd/lotel -run '^TestRegenerateOutputSchemas$'`.
+Review contract changes before accepting regenerated version 1 documents.
+The inventory test rejects public commands without an output contract.
 
 The first page adds a cursor capability to the local v3 index. Existing v3
 ingestion remains compatible. On a large index, the migration can hold the

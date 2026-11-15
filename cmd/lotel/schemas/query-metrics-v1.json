@@ -1,0 +1,194 @@
+{
+  "$id": "urn:lotel:output:query:metrics:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "properties": {
+      "aggregation_temporality": {
+        "type": "integer"
+      },
+      "attributes": {
+        "additionalProperties": {},
+        "type": "object"
+      },
+      "bucket_counts": {
+        "items": {
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "count": {
+        "type": "integer"
+      },
+      "description": {
+        "type": "string"
+      },
+      "exp_negative": {
+        "properties": {
+          "bucket_counts": {
+            "items": {
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "offset": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "offset",
+          "bucket_counts"
+        ],
+        "type": "object"
+      },
+      "exp_positive": {
+        "properties": {
+          "bucket_counts": {
+            "items": {
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "offset": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "offset",
+          "bucket_counts"
+        ],
+        "type": "object"
+      },
+      "exp_scale": {
+        "type": "integer"
+      },
+      "exp_zero_count": {
+        "type": "integer"
+      },
+      "explicit_bounds": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "enum": [
+                "NaN",
+                "Infinity",
+                "-Infinity"
+              ]
+            }
+          ]
+        },
+        "type": "array"
+      },
+      "is_monotonic": {
+        "type": "boolean"
+      },
+      "max": {
+        "type": "number"
+      },
+      "metric_name": {
+        "type": "string"
+      },
+      "metric_type": {
+        "type": "string"
+      },
+      "min": {
+        "type": "number"
+      },
+      "quantiles": {
+        "items": {
+          "properties": {
+            "quantile": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "enum": [
+                    "NaN",
+                    "Infinity",
+                    "-Infinity"
+                  ]
+                }
+              ]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "enum": [
+                    "NaN",
+                    "Infinity",
+                    "-Infinity"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "quantile",
+            "value"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "resource_attributes": {
+        "additionalProperties": {},
+        "type": "object"
+      },
+      "scope_name": {
+        "type": "string"
+      },
+      "scope_version": {
+        "type": "string"
+      },
+      "service_name": {
+        "type": "string"
+      },
+      "start_timestamp": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "sum": {
+        "type": "number"
+      },
+      "timestamp": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "unit": {
+        "type": "string"
+      },
+      "value": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "metric_name",
+      "metric_type",
+      "value",
+      "timestamp",
+      "service_name"
+    ],
+    "type": "object"
+  },
+  "title": "lotel query metrics stdout, version 1",
+  "type": "array"
+}

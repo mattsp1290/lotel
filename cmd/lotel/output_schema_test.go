@@ -47,7 +47,7 @@ func TestOutputSchemasValidatePageCLI(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".lotel")); !os.IsNotExist(err) {
 		t.Fatalf("schema discovery touched telemetry state: %v", err)
 	}
-	for _, args := range [][]string{{"output-schema", "query", "traces"}, {"output-schema", "--schema-version", "2", "query", "page", "logs"}, {"output-schema", "query", "page", "logs", "extra"}} {
+	for _, args := range [][]string{{"output-schema", "query", "unknown"}, {"output-schema", "--schema-version", "2", "query", "page", "logs"}, {"output-schema", "query", "page", "logs", "extra"}} {
 		if _, err := run(args...); err == nil {
 			t.Fatalf("expected error for %q", args)
 		}

@@ -1,0 +1,32 @@
+{
+  "$id": "urn:lotel:output:prune:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "properties": {
+      "cutoff": {
+        "type": "string"
+      },
+      "deleted": {
+        "type": "integer"
+      },
+      "otlp_envelopes_deleted": {
+        "type": "integer"
+      },
+      "service_name": {
+        "type": "string"
+      },
+      "signal": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "signal",
+      "deleted",
+      "otlp_envelopes_deleted",
+      "cutoff"
+    ],
+    "type": "object"
+  },
+  "title": "lotel prune stdout, version 1",
+  "type": "array"
+}
