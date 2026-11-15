@@ -84,6 +84,7 @@ type queryer interface {
 
 // TraceResult represents a single span in query results.
 type TraceResult struct {
+	cursorID           int64
 	TraceState         string         `json:"trace_state,omitempty"`
 	StatusMessage      string         `json:"status_message,omitempty"`
 	ResourceAttributes map[string]any `json:"resource_attributes,omitempty"`
@@ -136,6 +137,7 @@ type MetricResult struct {
 
 // LogResult represents a single log record.
 type LogResult struct {
+	cursorID           int64
 	ObservedTimestamp  *time.Time     `json:"observed_timestamp,omitempty"`
 	EventName          string         `json:"event_name,omitempty"`
 	BodyValue          any            `json:"body_value,omitempty"`
@@ -165,10 +167,10 @@ type MetricAggregation struct {
 
 // QueryTraces returns traces matching the given options.
 func QueryTraces(db queryer, opts TraceQueryOptions) ([]TraceResult, error) {
-	return queryTraces(db, opts, false)
+	return queryTraces(db, opts, false, nil)
 }
 
-func queryTraces(db queryer, opts TraceQueryOptions, recent bool) ([]TraceResult, error) {
+func queryTraces(db queryer, opts TraceQueryOptions, recent bool, page *pagePosition) ([]TraceResult, error) {
 	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
@@ -176,8 +178,11 @@ func queryTraces(db queryer, opts TraceQueryOptions, recent bool) ([]TraceResult
 		return nil, fmt.Errorf("minimum duration must be nonnegative")
 	}
 	query := `SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR), CAST(json_object('trace_state',"trace_state",'status_message',"status_message",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version",'schema_url',"schema_url",'events',"events",'links',"links") AS VARCHAR) FROM traces WHERE 1=1`
+	if page != nil {
+		query = strings.Replace(query, " FROM traces WHERE", ", cursor_id FROM traces WHERE", 1)
+	}
 	var args []any
-	if recent {
+	if recent || page != nil {
 		args = buildRecentWhere(&query, opts.QueryOptions, "start_time")
 	} else {
 		args = buildWhere(&query, opts.QueryOptions, "start_time")
@@ -191,9 +196,14 @@ func queryTraces(db queryer, opts TraceQueryOptions, recent bool) ([]TraceResult
 		query += " AND duration_ns >= ?"
 		args = append(args, int64(*opts.MinDuration))
 	}
+	if page != nil {
+		args = append(args, page.appendWhere(&query, "start_time")...)
+	}
 
-	if recent {
-		query += ` ORDER BY start_time DESC, to_json(traces) ASC, CAST(attributes AS VARCHAR) ASC NULLS FIRST, CAST(resource_attributes AS VARCHAR) ASC NULLS FIRST, CAST(events AS VARCHAR) ASC NULLS FIRST, CAST(links AS VARCHAR) ASC NULLS FIRST`
+	if page != nil {
+		query += " ORDER BY start_time DESC, cursor_id DESC"
+	} else if recent {
+		query += ` ORDER BY start_time DESC, json_merge_patch(to_json(traces), '{"cursor_id":null}') ASC, CAST(attributes AS VARCHAR) ASC NULLS FIRST, CAST(resource_attributes AS VARCHAR) ASC NULLS FIRST, CAST(events AS VARCHAR) ASC NULLS FIRST, CAST(links AS VARCHAR) ASC NULLS FIRST`
 	} else {
 		query += " ORDER BY start_time ASC"
 	}
@@ -213,7 +223,11 @@ func queryTraces(db queryer, opts TraceQueryOptions, recent bool) ([]TraceResult
 		var parentSpanID sql.NullString
 		var attrsJSON sql.NullString
 		var metadata string
-		err := rows.Scan(&r.TraceID, &r.SpanID, &parentSpanID, &r.Name, &r.Kind, &r.StartTime, &r.EndTime, &r.DurationNs, &r.StatusCode, &r.ServiceName, &attrsJSON, &metadata)
+		dest := []any{&r.TraceID, &r.SpanID, &parentSpanID, &r.Name, &r.Kind, &r.StartTime, &r.EndTime, &r.DurationNs, &r.StatusCode, &r.ServiceName, &attrsJSON, &metadata}
+		if page != nil {
+			dest = append(dest, &r.cursorID)
+		}
+		err := rows.Scan(dest...)
 		if err != nil {
 			return nil, fmt.Errorf("scanning trace row: %w", err)
 		}
@@ -289,10 +303,10 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 
 // QueryLogs returns logs matching the given options.
 func QueryLogs(db queryer, opts LogQueryOptions) ([]LogResult, error) {
-	return queryLogs(db, opts, false)
+	return queryLogs(db, opts, false, nil)
 }
 
-func queryLogs(db queryer, opts LogQueryOptions, recent bool) ([]LogResult, error) {
+func queryLogs(db queryer, opts LogQueryOptions, recent bool, page *pagePosition) ([]LogResult, error) {
 	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
@@ -300,17 +314,25 @@ func queryLogs(db queryer, opts LogQueryOptions, recent bool) ([]LogResult, erro
 		return nil, err
 	}
 	query := `SELECT timestamp, severity, severity_number, body, service_name, trace_id, span_id, CAST(attributes AS VARCHAR), CAST(json_object('observed_timestamp',strftime("observed_timestamp", '%Y-%m-%dT%H:%M:%S.%fZ'),'event_name',"event_name",'body_value',body_json,'flags',"flags",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version") AS VARCHAR) FROM logs WHERE 1=1`
+	if page != nil {
+		query = strings.Replace(query, " FROM logs WHERE", ", cursor_id FROM logs WHERE", 1)
+	}
 	var args []any
-	if recent {
+	if recent || page != nil {
 		args = buildRecentWhere(&query, opts.QueryOptions, "timestamp")
 	} else {
 		args = buildWhere(&query, opts.QueryOptions, "timestamp")
 	}
 	args = append(args, buildFilters(&query, opts.QueryOptions, "")...)
 	args = append(args, appendLogFilters(&query, opts.MinSeverity, opts.BodyContains)...)
+	if page != nil {
+		args = append(args, page.appendWhere(&query, "timestamp")...)
+	}
 
-	if recent {
-		query += ` ORDER BY timestamp DESC, to_json(logs) ASC, CAST(attributes AS VARCHAR) ASC NULLS FIRST, CAST(resource_attributes AS VARCHAR) ASC NULLS FIRST, CAST(body_json AS VARCHAR) ASC NULLS FIRST`
+	if page != nil {
+		query += " ORDER BY timestamp DESC, cursor_id DESC"
+	} else if recent {
+		query += ` ORDER BY timestamp DESC, json_merge_patch(to_json(logs), '{"cursor_id":null}') ASC, CAST(attributes AS VARCHAR) ASC NULLS FIRST, CAST(resource_attributes AS VARCHAR) ASC NULLS FIRST, CAST(body_json AS VARCHAR) ASC NULLS FIRST`
 	} else {
 		query += " ORDER BY timestamp ASC"
 	}
@@ -331,7 +353,11 @@ func queryLogs(db queryer, opts LogQueryOptions, recent bool) ([]LogResult, erro
 		var traceID, spanID sql.NullString
 		var attrsJSON sql.NullString
 		var metadata string
-		err := rows.Scan(&r.Timestamp, &severity, &r.SeverityNumber, &r.Body, &r.ServiceName, &traceID, &spanID, &attrsJSON, &metadata)
+		dest := []any{&r.Timestamp, &severity, &r.SeverityNumber, &r.Body, &r.ServiceName, &traceID, &spanID, &attrsJSON, &metadata}
+		if page != nil {
+			dest = append(dest, &r.cursorID)
+		}
+		err := rows.Scan(dest...)
 		if err != nil {
 			return nil, fmt.Errorf("scanning log row: %w", err)
 		}

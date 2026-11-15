@@ -208,6 +208,8 @@ lotel --version
 | `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
 | `lotel assert signal` | Fail if a service has no indexed signal in a time window |
 | `lotel query traces` | Query traces (JSON output) |
+| `lotel query page traces` | Page through a bounded trace snapshot |
+| `lotel query page logs` | Page through a bounded log snapshot |
 | `lotel query span-stats` | Summarize observed spans by service, name, and kind |
 | `lotel query recent traces` / `lotel query recent logs` | Return a bounded newest-first snapshot |
 | `lotel query log-stats` | Summarize observed logs by service and severity |
@@ -333,6 +335,29 @@ remain separate. Time bounds apply to projected microsecond timestamps.
 Each result describes one database query. Ingestion, pruning, or rebuilding can
 change a later result. This command does not provide a continuation cursor.
 The limit bounds returned records, not the work needed to search the database.
+
+`lotel query page traces --since 15m --limit 100` and `lotel query page logs
+--since 15m --limit 100` return records and, when more records exist, a
+`next_cursor`. Pass that value to the same command with `--cursor` to continue.
+The first request accepts `--service` and `--until`; continuation requests must
+not repeat filters or a limit. Records are ordered by projected timestamp and a
+stable row ID, newest first. A limit bounds the number of returned records, not
+the amount of work or the size of an individual record.
+
+The first page adds a cursor capability to the local v3 index. Existing v3
+ingestion remains compatible. On a large index, the migration can hold the
+database lock long enough for an ingestion pass to time out. Collection
+continues, and the worker retries. An older v3 binary can order equal-time
+`query recent` results differently after this migration. Rows indexed after the
+first page, including backdated rows, do not enter that snapshot. Pruning any
+preexisting row of the same signal invalidates the cursor, even if that row did
+not match the filters. Rebuilding the index also invalidates cursors. No-op and
+dry-run pruning do not.
+External database restoration or replacement and direct SQL changes can bypass
+invalidation; discard existing cursors after those operations. This contract
+assumes lotel's supported writers assign IDs and do not update indexed rows.
+Cursor values are integrity checked but not encrypted or authorization tokens.
+They can reveal the service name and window, so handle them like query output.
 
 Query commands accept different filters. Most support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`. The single-trace query has no time or service filters. Dependency discovery accepts only `--since` and `--until`. Metric difference uses a selector and exact nanosecond timestamps:
 
