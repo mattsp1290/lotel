@@ -202,6 +202,7 @@ lotel --version
 | `lotel health` | Check collector health (exit 0/1) |
 | `lotel ingest` | Incrementally ingest new JSONL telemetry (JSON report) |
 | `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
+| `lotel assert signal` | Fail if a service has no indexed signal in a time window |
 | `lotel query traces` | Query traces (JSON output) |
 | `lotel query services` | List observed services and their signals |
 | `lotel query operations` | List observed span names and kinds |
@@ -214,6 +215,21 @@ lotel --version
 | `lotel query genai usage` | Group token usage, errors, and latency |
 | `lotel query aggregate` | Compute avg/min/max for a metric |
 | `lotel prune` | Delete telemetry older than threshold |
+
+## Assert signal evidence
+
+Use `lotel assert signal --signal traces --service my-app --since 10m` to
+check for an indexed record. Select `traces`, `metrics`, or `logs` with
+`--signal`. The `--since` value is a positive duration or an RFC3339 timestamp.
+`--until` accepts an RFC3339 timestamp and defaults to now. Both bounds are
+inclusive. The command rejects future end times.
+
+The command returns JSON with the resolved window, `passed`, and, when a
+record matches, `latest_timestamp`. It exits 0 for a match and 1 for no match
+or an error. A missing match means no projected record is indexed in the
+window. It does not prove the application or Collector failed. Allow time for
+export and ingestion, and use `lotel status` and `lotel health` for collection
+status. Historical assertions do not require a running Collector.
 
 ## Query options
 
