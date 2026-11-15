@@ -69,7 +69,12 @@ func Run(ctx context.Context, options RuntimeOptions) error {
 			status.Running = col.GetState() != otelcol.StateClosed
 			status.Healthy = col.GetState() == otelcol.StateRunning
 		} else {
-			status.Running = isContainerRunning()
+			running, err := inspectDockerRunning(r.Context())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			status.Running = running
 			status.Healthy = status.Running && checkHealth()
 		}
 		status.Healthy = status.Healthy && (!status.Ingestion.Enabled || status.Ingestion.Running && status.Ingestion.LastError == "")
@@ -147,9 +152,11 @@ func monitorDocker(ctx context.Context) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		if !isContainerRunning() {
+		running, err := inspectDockerRunning(ctx)
+		if err == nil && !running {
 			return errors.New("Collector container exited")
 		}
+		// An unavailable Docker API does not prove that collection has stopped.
 		select {
 		case <-ctx.Done():
 			return nil

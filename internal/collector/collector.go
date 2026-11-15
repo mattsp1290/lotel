@@ -131,11 +131,33 @@ func findDocker() (string, error) {
 
 // isContainerRunning checks if the lotel-collector container is running.
 func isContainerRunning() bool {
-	out, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", containerName).Output()
+	running, _ := inspectDockerRunning(context.Background())
+	return running
+}
+
+func inspectDockerRunning(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Running}}", containerName)
+	cmd.WaitDelay = 100 * time.Millisecond
+	out, err := cmd.Output()
 	if err != nil {
-		return false
+		// A successful inventory can confirm removal; a failed inspect alone cannot.
+		list := exec.CommandContext(ctx, "docker", "ps", "--all", "--filter", "name=^/"+containerName+"$", "--format", "{{.ID}}")
+		list.WaitDelay = 100 * time.Millisecond
+		if ids, listErr := list.Output(); listErr == nil && len(strings.Fields(string(ids))) == 0 {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect Collector running state: %w", err)
 	}
-	return strings.TrimSpace(string(out)) == "true"
+	switch strings.TrimSpace(string(out)) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, errors.New("Docker returned an invalid Collector running state")
+	}
 }
 
 // containerExists checks if the lotel-collector container exists (any state).
@@ -159,9 +181,12 @@ func InspectForUpgrade(ctx context.Context) (*Status, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	docker, err := findDocker()
+	docker, err := exec.LookPath("docker")
+	if state == nil && errors.Is(err, exec.ErrNotFound) {
+		return &Status{}, nil
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("locating Docker for Collector inspection: %w", err)
 	}
 	list := exec.CommandContext(ctx, docker, "ps", "--all", "--filter", "name=^/"+containerName+"$", "--format", "{{.ID}}")
 	list.WaitDelay = time.Second
@@ -263,8 +288,19 @@ func startDocker(ctx context.Context, configPath, dataPath string) error {
 		if err != nil {
 			return err
 		}
-		mountConfig = filepath.Join(filepath.Dir(statePath), "docker-collector.yaml")
-		if err := os.WriteFile(mountConfig, collectorConfig.YAML, 0o600); err != nil {
+		privateDir := filepath.Join(filepath.Dir(statePath), "docker-config")
+		if err := os.MkdirAll(privateDir, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(privateDir, 0o700); err != nil {
+			return err
+		}
+		// Docker mounts only this file; the private parent protects it on the host.
+		mountConfig = filepath.Join(privateDir, "collector.yaml")
+		if err := os.WriteFile(mountConfig, collectorConfig.YAML, 0o644); err != nil {
+			return err
+		}
+		if err := os.Chmod(mountConfig, 0o644); err != nil {
 			return err
 		}
 	}

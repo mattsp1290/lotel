@@ -30,13 +30,26 @@ func TestDockerAdoptionRunsAutomaticIngestion(t *testing.T) {
 	binDir := t.TempDir()
 	running := filepath.Join(t.TempDir(), "running")
 	allowRun := filepath.Join(t.TempDir(), "allow-run")
+	probe := filepath.Join(t.TempDir(), "probe")
+	calls := filepath.Join(t.TempDir(), "calls")
 	if err := os.WriteFile(running, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	docker := `#!/bin/sh
 case "$1" in
-inspect) [ -f "$LOTEL_DOCKER_TEST_RUNNING" ] || exit 1; if [ "$2" = "-f" ]; then printf 'true\n'; fi;;
-stop|rm) /bin/rm -f "$LOTEL_DOCKER_TEST_RUNNING";;
+inspect)
+  [ ! -f "$LOTEL_DOCKER_TEST_PROBE.unavailable" ] || exit 125
+  if [ -f "$LOTEL_DOCKER_TEST_PROBE.fail" ]; then
+    /bin/rm "$LOTEL_DOCKER_TEST_PROBE.fail"
+    printf failed > "$LOTEL_DOCKER_TEST_PROBE.failed"
+    printf 'temporary Docker API error\n' >&2
+    exit 125
+  fi
+  [ ! -f "$LOTEL_DOCKER_TEST_PROBE.failed" ] || printf recovered > "$LOTEL_DOCKER_TEST_PROBE.recovered"
+  [ -f "$LOTEL_DOCKER_TEST_RUNNING" ] || exit 1
+  if [ "$2" = "-f" ]; then printf 'true\n'; fi;;
+ps) [ ! -f "$LOTEL_DOCKER_TEST_PROBE.unavailable" ] || exit 125; if [ -f "$LOTEL_DOCKER_TEST_RUNNING" ]; then printf '0123456789ab\n'; fi;;
+stop|rm) printf '%s\n' "$1" >> "$LOTEL_DOCKER_TEST_CALLS"; /bin/rm -f "$LOTEL_DOCKER_TEST_RUNNING";;
 run) [ -f "$LOTEL_DOCKER_TEST_ALLOW_RUN" ] || exit 99;printf running > "$LOTEL_DOCKER_TEST_RUNNING";printf 'replacement-container\n';;
 *) exit 1;;
 esac
@@ -44,7 +57,7 @@ esac
 	if err := os.WriteFile(filepath.Join(binDir, "docker"), []byte(docker), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	f.env = append(f.env, "PATH="+binDir, "LOTEL_DOCKER_TEST_RUNNING="+running, "LOTEL_DOCKER_TEST_ALLOW_RUN="+allowRun)
+	f.env = append(f.env, "PATH="+binDir, "LOTEL_DOCKER_TEST_RUNNING="+running, "LOTEL_DOCKER_TEST_ALLOW_RUN="+allowRun, "LOTEL_DOCKER_TEST_PROBE="+probe, "LOTEL_DOCKER_TEST_CALLS="+calls)
 	dataPath := filepath.Join(f.home, ".lotel", "data")
 	statePath := filepath.Join(f.home, ".lotel", "collector.state")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o700); err != nil {
@@ -109,6 +122,63 @@ esac
 	}
 	if status.Ingestion.LastSuccess == nil || status.Ingestion.LastError != "" || !status.Ingestion.Running {
 		t.Fatalf("ingestion status: %+v", status.Ingestion)
+	}
+	if err := os.WriteFile(probe+".fail", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(probe + ".recovered"); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("monitor did not retry after one failed Docker inspection")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if data, err := os.ReadFile(calls); !os.IsNotExist(err) {
+		t.Fatalf("transient inspection caused destructive Docker commands: %s %v", data, err)
+	}
+	file, err := os.OpenFile(logs, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, writeErr := file.WriteString(strings.ReplaceAll(payload, "indexed by adopted runtime", "indexed after Docker recovered"))
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		t.Fatalf("append telemetry: %v %v", writeErr, closeErr)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		out, err := f.run("query", "logs", "--service", "automatic-docker")
+		var rows []json.RawMessage
+		if err == nil && json.Unmarshal(out, &rows) == nil && len(rows) == 2 && strings.Contains(string(out), "indexed after Docker recovered") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("automatic ingestion did not survive Docker inspection error: %v %s", err, out)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	out, err = f.run("status")
+	if err != nil || json.Unmarshal(out, &status) != nil || status.PID != pid || !status.Running || !status.Ingestion.Running {
+		t.Fatalf("inspection recovery replaced or stopped runtime: %v %s", err, out)
+	}
+	if err := os.WriteFile(probe+".unavailable", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := f.run("start"); err == nil {
+		t.Fatalf("repeated start accepted an unknown Docker running state: %s", out)
+	}
+	if err := os.Remove(probe + ".unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(calls); !os.IsNotExist(err) {
+		t.Fatalf("unavailable status caused destructive Docker commands: %s %v", data, err)
+	}
+	out, err = f.run("status")
+	if err != nil || json.Unmarshal(out, &status) != nil || status.PID != pid || !status.Running {
+		t.Fatalf("repeated start replaced runtime after unknown status: %v %s", err, out)
 	}
 
 	if err := os.WriteFile(allowRun, nil, 0o600); err != nil {
