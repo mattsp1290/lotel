@@ -162,7 +162,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			opts.ErrorsOnly, _ = cmd.Flags().GetBool("errors-only")
+			opts.SpanErrorsOnly, _ = cmd.Flags().GetBool("errors-only")
 			if cmd.Flags().Changed("min-duration") {
 				duration, _ := cmd.Flags().GetDuration("min-duration")
 				if duration < 0 {

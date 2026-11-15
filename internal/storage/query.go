@@ -14,16 +14,16 @@ import (
 type AttrFilter struct{ Key, Value string }
 
 type QueryOptions struct {
-	ErrorsOnly  bool
-	MinDuration *time.Duration
-	Name        string
-	TraceID     string
-	EventName   string
-	Attrs       []AttrFilter
-	Service     string
-	Since       time.Time
-	Until       time.Time
-	Limit       int
+	SpanErrorsOnly bool
+	MinDuration    *time.Duration
+	Name           string
+	TraceID        string
+	EventName      string
+	Attrs          []AttrFilter
+	Service        string
+	Since          time.Time
+	Until          time.Time
+	Limit          int
 }
 
 type queryer interface {
@@ -122,7 +122,7 @@ func QueryTraces(db queryer, opts QueryOptions) ([]TraceResult, error) {
 	query := `SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, CAST(attributes AS VARCHAR), CAST(json_object('trace_state',"trace_state",'status_message',"status_message",'resource_attributes',"resource_attributes",'scope_name',"scope_name",'scope_version',"scope_version",'schema_url',"schema_url",'events',"events",'links',"links") AS VARCHAR) FROM traces WHERE 1=1`
 	args := buildWhere(&query, opts, "start_time")
 	args = append(args, buildFilters(&query, opts, "name")...)
-	if opts.ErrorsOnly {
+	if opts.SpanErrorsOnly {
 		query += " AND status_code = ?"
 		args = append(args, 2)
 	}
