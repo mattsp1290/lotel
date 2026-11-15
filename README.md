@@ -202,6 +202,7 @@ lotel --version
 | `lotel stop` | Stop the collector |
 | `lotel status` | Show collector status (JSON) |
 | `lotel health` | Check collector health (exit 0/1) |
+| `lotel diagnose runtime` | Inspect the recorded runtime and ingestion status without changing files |
 | `lotel ingest` | Incrementally ingest new JSONL telemetry (JSON report) |
 | `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
 | `lotel assert signal` | Fail if a service has no indexed signal in a time window |
@@ -246,6 +247,16 @@ or an error. A missing match means no projected record is indexed in the
 window. It does not prove the application or Collector failed. Allow time for
 export and ingestion, and use `lotel status` and `lotel health` for collection
 status. Historical assertions do not require a running Collector.
+
+`lotel diagnose runtime` reads the recorded runtime state and requests its
+status without creating files or opening the database. A missing state file
+means no runtime is recorded. The state must be a regular file, not a symbolic
+link. A missing state file does not establish whether a Collector is
+running. An unavailable runtime leaves its running and health values unknown.
+`combined_healthy` reflects both Collector and automatic-ingestion health.
+Ingestion errors are reported as `has_error`; the report omits the error text,
+control socket, and token. It does not inspect an unmanaged Docker container
+or check whether any signal has reached the index.
 
 ## Query options
 

@@ -251,7 +251,7 @@ func main() {
 
 	var catalog commandCatalog
 	rootCmd.AddCommand(runtimeRunCommand())
-	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, assertCommand(), pruneCmd, upgradeCommand(), commandsCommand(&catalog))
+	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, assertCommand(), pruneCmd, upgradeCommand(), diagnoseCommand(), commandsCommand(&catalog))
 	rootCmd.InitDefaultVersionFlag()
 	catalog = buildCommandCatalog(rootCmd, version)
 
