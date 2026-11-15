@@ -27,13 +27,13 @@ type signalDiagnosticRequest struct {
 const maxSignalServiceBytes = 4096
 const maxSignalProtocolBytes = 64 << 10
 
-type cappedOutput struct{ bytes.Buffer }
+type cappedOutput struct{ buffer bytes.Buffer }
 
 func (b *cappedOutput) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > maxSignalProtocolBytes {
+	if b.buffer.Len()+len(p) > maxSignalProtocolBytes {
 		return 0, fmt.Errorf("response too large")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 
 func unavailableSignalReport(req signalDiagnosticRequest, reason string) storage.SignalDiagnosis {
@@ -70,7 +70,7 @@ func runSignalWorker(parent context.Context, executable string, req signalDiagno
 		return report
 	}
 	var result storage.SignalDiagnosis
-	if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.SchemaVersion != 1 || result.Service != req.Service || !result.Since.Equal(req.Since) || !result.Until.Equal(req.Until) || len(result.Signals) != 3 {
+	if err := json.Unmarshal(out.buffer.Bytes(), &result); err != nil || result.SchemaVersion != 1 || result.Service != req.Service || !result.Since.Equal(req.Since) || !result.Until.Equal(req.Until) || len(result.Signals) != 3 {
 		return report
 	}
 	if result.Observation != "available" && result.Observation != "unavailable" {
@@ -81,7 +81,7 @@ func runSignalWorker(parent context.Context, executable string, req signalDiagno
 	}
 	if result.Observation == "unavailable" {
 		switch result.Reason {
-		case "data_missing", "data_busy", "data_unavailable", "unsafe_path", "schema_unavailable":
+		case "data_missing", "data_busy", "data_unavailable", "unsafe_path", "schema_unavailable", "wal_present":
 		default:
 			return report
 		}

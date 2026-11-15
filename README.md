@@ -268,7 +268,9 @@ failed. Unavailable data is reported as unknown, not as an absent match.
 The command opens an existing database in read-only mode under its existing
 lock. It does not create the database or lock, or migrate the schema. It
 rejects database paths containing `?`, `#`, or `%`, and it bounds the time
-spent in a separate worker. It assumes the private data directory and its
+spent in a separate worker. If a database WAL exists, the report is unavailable
+until normal database recovery removes it. The command does not modify the WAL.
+It assumes the private data directory and its
 entries are not concurrently replaced. DuckDB opens the database by pathname,
 so identity checks cannot rule out a replacement at the instant of open.
 

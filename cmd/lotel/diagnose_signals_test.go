@@ -98,4 +98,16 @@ func TestSignalWorkerTimeoutAndInvalidResponse(t *testing.T) {
 	if got.Observation != "unavailable" || got.Reason != "worker_unavailable" {
 		t.Fatalf("invalid response: %+v", got)
 	}
+	valid, err := json.Marshal(unavailableSignalReport(req, "data_missing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nprintf '%s' '" + string(valid) + "'\ndd if=/dev/zero bs=1024 count=70 2>/dev/null | tr '\\000' ' '\n"
+	if err := os.WriteFile(executable, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	got = runSignalWorker(context.Background(), executable, req)
+	if got.Observation != "unavailable" || got.Reason != "worker_unavailable" {
+		t.Fatalf("over-limit valid response accepted: %+v", got)
+	}
 }

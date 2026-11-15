@@ -137,7 +137,7 @@ func TestDiagnoseSignalsPreservesWAL(t *testing.T) {
 	}
 	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	got := DiagnoseSignals(context.Background(), path, "app", start, start.Add(time.Second))
-	if got.Observation != "available" || got.Signals[2].ObservedInWindow == nil || !*got.Signals[2].ObservedInWindow {
+	if got.Observation != "unavailable" || got.Reason != "wal_present" || got.Signals[2].ObservedInWindow != nil {
 		t.Fatalf("WAL result: %+v", got)
 	}
 	afterDB, err := os.ReadFile(path)

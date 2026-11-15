@@ -40,6 +40,17 @@ func unavailableReason(err error) string {
 	return "data_unavailable"
 }
 
+func diagnosticWALAbsent(path string) (bool, error) {
+	_, err := os.Lstat(path + ".wal")
+	if err == nil {
+		return false, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	return false, err
+}
+
 func DiagnoseSignals(ctx context.Context, path, service string, since, until time.Time) (report SignalDiagnosis) {
 	report = unavailableSignals(service, since, until, "data_unavailable")
 	if service == "" || since.IsZero() || until.IsZero() || since.After(until) {
@@ -88,6 +99,14 @@ func DiagnoseSignals(ctx context.Context, path, service string, since, until tim
 		return
 	}
 	if !before.Mode().IsRegular() {
+		return
+	}
+	walAbsent, err := diagnosticWALAbsent(path)
+	if err != nil {
+		return
+	}
+	if !walAbsent {
+		report.Reason = "wal_present"
 		return
 	}
 	pathLock, err := os.Lstat(lockPath)
@@ -147,6 +166,14 @@ func DiagnoseSignals(ctx context.Context, path, service string, since, until tim
 		return
 	}
 	closed = true
+	walAbsent, err = diagnosticWALAbsent(path)
+	if err != nil {
+		return
+	}
+	if !walAbsent {
+		report.Reason = "wal_present"
+		return
+	}
 	after, err := os.Lstat(path)
 	if err != nil || !os.SameFile(before, after) {
 		return
