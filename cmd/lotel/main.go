@@ -263,7 +263,7 @@ func main() {
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd, queryLogsCmd} {
 		cmd.Flags().StringArray("attr", nil, "attribute key=value; repeat for AND; matches compact JSON string form, null never matches")
 	}
-	queryCmd.AddCommand(queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand())
+	queryCmd.AddCommand(queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
 
 	// --- prune ---
 	var olderThan string
@@ -283,7 +283,7 @@ func main() {
 
 			var cutoff time.Time
 			if pruneAll {
-				cutoff = time.Now().Add(time.Hour) // future cutoff catches everything
+				cutoff = time.Now()
 			} else {
 				dur, err := parseDuration(olderThan)
 				if err != nil {
@@ -296,7 +296,11 @@ func main() {
 			if err != nil {
 				return err
 			}
-			reports, err := storage.Prune(db, cutoff, pruneService, dryRun)
+			prune := storage.Prune
+			if pruneAll {
+				prune = storage.PruneAll
+			}
+			reports, err := prune(db, cutoff, pruneService, dryRun)
 			if err != nil {
 				return err
 			}
@@ -391,7 +395,7 @@ func openDB() (*sql.DB, error) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	if err == nil && storage.SchemaRebuilt {
-		fmt.Fprintln(os.Stderr, "lotel: database rebuilt for schema v2; run 'lotel ingest' to reload raw telemetry")
+		fmt.Fprintln(os.Stderr, "lotel: database index rebuilt; run 'lotel ingest' to reload raw telemetry")
 		storage.SchemaRebuilt = false
 	}
 	return db, err

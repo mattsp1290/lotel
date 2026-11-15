@@ -23,7 +23,7 @@ func TestWindowsLifecycleBuilds(t *testing.T) {
 	}
 	stubs := `package collector
 import("context";"time")
-type State struct {Backend string;PID int;ControlSocket,ControlToken string;StartedAt time.Time;ConfigPath,ConfigSHA256,DataPath string}
+type State struct {Backend string;PID int;ControlSocket,ControlToken string;StartedAt time.Time;ConfigPath,ConfigSHA256,DataPath string;ProfilesEnabled bool}
 type Status struct {Backend string;Running,Healthy bool;Uptime string}
 type nativeShutdownResult struct {Error string}
 func stateFilePath()(string,error){return "",nil}

@@ -6,62 +6,81 @@ import (
 	"time"
 )
 
-// PruneReport describes what was or would be pruned.
 type PruneReport struct {
-	Signal      string `json:"signal"`
-	ServiceName string `json:"service_name,omitempty"`
-	Deleted     int64  `json:"deleted"`
-	Cutoff      string `json:"cutoff"`
+	Signal               string `json:"signal"`
+	ServiceName          string `json:"service_name,omitempty"`
+	Deleted              int64  `json:"deleted"`
+	OTLPEnvelopesDeleted int64  `json:"otlp_envelopes_deleted"`
+	Cutoff               string `json:"cutoff"`
 }
 
-// Prune deletes telemetry data older than the cutoff time.
-// If dryRun is true, returns what would be deleted without deleting.
-// Pruned rows can reappear after a schema rebuild because raw JSONL is retained.
 func Prune(db *sql.DB, cutoff time.Time, service string, dryRun bool) ([]PruneReport, error) {
-	signals := []string{"traces", "metrics", "logs"}
-	timeCols := map[string]string{
-		"traces":  "start_time",
-		"metrics": "timestamp",
-		"logs":    "timestamp",
+	return prune(db, cutoff, service, dryRun, false)
+}
+
+func PruneAll(db *sql.DB, cutoff time.Time, service string, dryRun bool) ([]PruneReport, error) {
+	return prune(db, cutoff, service, dryRun, true)
+}
+
+func prune(db *sql.DB, cutoff time.Time, service string, dryRun, includeUndated bool) ([]PruneReport, error) {
+	cutoffNano, err := queryNano(cutoff)
+	if err != nil {
+		return nil, err
 	}
-
-	var reports []PruneReport
-	for _, signal := range signals {
-		timeCol := timeCols[signal]
-
-		// Count rows that would be deleted.
-		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s < ?", signal, timeCol)
-		args := []interface{}{cutoff}
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	reports := []PruneReport{}
+	for _, signal := range otlpSignals {
+		report := PruneReport{Signal: signal.name, ServiceName: service, Cutoff: cutoff.Format(time.RFC3339)}
+		if signal.name != "profiles" {
+			timeColumn := "timestamp"
+			if signal.name == "traces" {
+				timeColumn = "start_time"
+			}
+			where := fmt.Sprintf(" WHERE %s < ?", timeColumn)
+			args := []any{cutoff}
+			if includeUndated {
+				where = " WHERE 1=1"
+				args = nil
+			}
+			if service != "" {
+				where += " AND service_name=?"
+				args = append(args, service)
+			}
+			if err := tx.QueryRow("SELECT COUNT(*) FROM "+signal.name+where, args...).Scan(&report.Deleted); err != nil {
+				return nil, err
+			}
+			if !dryRun {
+				if _, err := tx.Exec("DELETE FROM "+signal.name+where, args...); err != nil {
+					return nil, err
+				}
+			}
+		}
+		where := " WHERE signal=? AND last_nano<CAST(? AS UBIGINT)"
+		args := []any{signal.name, cutoffNano}
+		if includeUndated {
+			where = " WHERE signal=?"
+			args = []any{signal.name}
+		}
 		if service != "" {
-			countQuery += " AND service_name = ?"
+			where += " AND service_name=?"
 			args = append(args, service)
 		}
-
-		var count int64
-		if err := db.QueryRow(countQuery, args...).Scan(&count); err != nil {
-			return nil, fmt.Errorf("counting %s for prune: %w", signal, err)
+		if err := tx.QueryRow("SELECT COUNT(*) FROM otlp_envelopes"+where, args...).Scan(&report.OTLPEnvelopesDeleted); err != nil {
+			return nil, err
 		}
-
-		if !dryRun && count > 0 {
-			deleteQuery := fmt.Sprintf("DELETE FROM %s WHERE %s < ?", signal, timeCol)
-			deleteArgs := []interface{}{cutoff}
-			if service != "" {
-				deleteQuery += " AND service_name = ?"
-				deleteArgs = append(deleteArgs, service)
+		if !dryRun {
+			if _, err := tx.Exec("DELETE FROM otlp_envelopes"+where, args...); err != nil {
+				return nil, err
 			}
-			result, err := db.Exec(deleteQuery, deleteArgs...)
-			if err != nil {
-				return nil, fmt.Errorf("pruning %s: %w", signal, err)
-			}
-			count, _ = result.RowsAffected()
 		}
-
-		reports = append(reports, PruneReport{
-			Signal:      signal,
-			ServiceName: service,
-			Deleted:     count,
-			Cutoff:      cutoff.Format(time.RFC3339),
-		})
+		reports = append(reports, report)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return reports, nil
 }

@@ -1,9 +1,48 @@
 package collector
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestStartEnablesProfiles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("PATH", tmp)
+	argsPath := filepath.Join(tmp, "docker-args")
+	t.Setenv("LOTEL_TEST_DOCKER_ARGS", argsPath)
+	script := "#!/bin/sh\ncase \"$1\" in\ninspect) exit 1;;\nrun) printf '%s\\n' \"$@\" > \"$LOTEL_TEST_DOCKER_ARGS\"; printf 'test-container\\n';;\n*) exit 1;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(tmp, "docker"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("service: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dataPath := filepath.Join(tmp, "data")
+	if err := Start(context.Background(), cfg, dataPath, "docker"); err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := defaultImage + "\n--config=/etc/otelcol-contrib/config.yaml\n--feature-gates=+service.profilesSupport\n"
+	if !strings.HasSuffix(string(args), command) {
+		t.Fatalf("collector command does not enable profiles with its config: %s", args)
+	}
+	if _, err := os.Stat(filepath.Join(dataPath, "profiles")); err != nil {
+		t.Fatal(err)
+	}
+	state, err := readState()
+	if err != nil || state == nil || !state.ProfilesEnabled {
+		t.Fatalf("profile capability was not persisted: %+v %v", state, err)
+	}
+}
 
 func TestStateRoundtrip(t *testing.T) {
 	// Use a temp directory for state.
@@ -21,12 +60,13 @@ func TestStateRoundtrip(t *testing.T) {
 
 	// Write state.
 	state := &State{
-		ContainerID:   "abc123def456",
-		ContainerName: "lotel-collector",
-		Image:         "otel/opentelemetry-collector-contrib:latest",
-		StartedAt:     time.Now(),
-		ConfigPath:    "/tmp/config.yaml",
-		DataPath:      "/tmp/data",
+		ContainerID:     "abc123def456",
+		ContainerName:   "lotel-collector",
+		Image:           "otel/opentelemetry-collector-contrib:latest",
+		StartedAt:       time.Now(),
+		ConfigPath:      "/tmp/config.yaml",
+		DataPath:        "/tmp/data",
+		ProfilesEnabled: true,
 	}
 	if err := writeState(state); err != nil {
 		t.Fatalf("writeState: %v", err)
@@ -45,6 +85,9 @@ func TestStateRoundtrip(t *testing.T) {
 	}
 	if got.Image != "otel/opentelemetry-collector-contrib:latest" {
 		t.Errorf("Image = %q, want %q", got.Image, "otel/opentelemetry-collector-contrib:latest")
+	}
+	if !got.ProfilesEnabled {
+		t.Error("profiles launch capability was not persisted")
 	}
 
 	// Remove state.

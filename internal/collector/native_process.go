@@ -96,7 +96,7 @@ func startNative(ctx context.Context, configPath, dataPath string) error {
 	}
 	done := make(chan error, 1)
 	go func() { done <- command.Wait() }()
-	state = &State{Backend: "native", PID: command.Process.Pid, ControlSocket: socket, ControlToken: token, StartedAt: time.Now(), ConfigPath: configPath, ConfigSHA256: hash, DataPath: dataPath}
+	state = &State{Backend: "native", PID: command.Process.Pid, ControlSocket: socket, ControlToken: token, StartedAt: time.Now(), ConfigPath: configPath, ConfigSHA256: hash, DataPath: dataPath, ProfilesEnabled: true}
 	deadline := time.NewTimer(30 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(50 * time.Millisecond)

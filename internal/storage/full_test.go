@@ -8,13 +8,14 @@ import (
 )
 
 func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
+	projectionSignals := []string{"traces", "metrics", "logs"}
 	root := t.TempDir()
 	db, err := OpenDB(filepath.Join(root, "lotel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, signal := range ingestSignals {
+	for _, signal := range projectionSignals {
 		fixture, err := os.ReadFile(filepath.Join("testdata", "genai", signal+".jsonl"))
 		if err != nil {
 			t.Fatal(err)
@@ -31,7 +32,7 @@ func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, signal := range ingestSignals {
+	for _, signal := range projectionSignals {
 		if _, err := db.Exec("DELETE FROM " + signal); err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +40,7 @@ func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
 	if _, err := IngestAll(db, root); err != nil {
 		t.Fatal(err)
 	}
-	for _, signal := range ingestSignals {
+	for _, signal := range projectionSignals {
 		var count int
 		if err := db.QueryRow("SELECT count(*) FROM " + signal).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("incremental ingestion restored %s rows without new bytes: %d, %v", signal, count, err)
@@ -50,7 +51,7 @@ func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, signal := range ingestSignals {
+		for _, signal := range projectionSignals {
 			want := first.Signals[signal].Records
 			var count int
 			if err := db.QueryRow("SELECT count(*) FROM " + signal).Scan(&count); err != nil {
@@ -65,8 +66,8 @@ func TestReingestAllReplacesRowsAndResetsCursors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, signal := range ingestSignals {
-		if report.Signals[signal].Records != 0 {
+	for signal, signalReport := range report.Signals {
+		if signalReport.Records != 0 || signalReport.OTLPEnvelopes != 0 {
 			t.Fatalf("incremental ingestion duplicated rebuilt %s", signal)
 		}
 	}

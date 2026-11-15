@@ -18,18 +18,21 @@ type IngestReport struct {
 	Signals map[string]*SignalReport `json:"signals"`
 }
 type SignalReport struct {
-	Files          int   `json:"files"`
-	Lines          int   `json:"lines"`
-	Records        int   `json:"records"`
-	SkippedLines   int   `json:"skipped_lines"`
-	SkippedRecords int   `json:"skipped_records"`
-	Bytes          int64 `json:"bytes"`
+	Files                  int   `json:"files"`
+	Lines                  int   `json:"lines"`
+	Records                int   `json:"records"`
+	SkippedLines           int   `json:"skipped_lines"`
+	SkippedRecords         int   `json:"skipped_records"`
+	Bytes                  int64 `json:"bytes"`
+	OTLPEnvelopes          int   `json:"otlp_envelopes"`
+	ProjectionSkippedLines int   `json:"projection_skipped_lines"`
 }
 
 // IngestAll incrementally ingests complete JSONL lines in per-file transactions.
 func IngestAll(db *sql.DB, dataPath string) (*IngestReport, error) {
 	report := &IngestReport{Signals: map[string]*SignalReport{}}
-	for _, signal := range ingestSignals {
+	for _, descriptor := range otlpSignals {
+		signal := descriptor.name
 		rep := &SignalReport{}
 		report.Signals[signal] = rep
 		path, err := filepath.Abs(filepath.Join(dataPath, signal, signal+".jsonl"))
@@ -52,8 +55,6 @@ func fileFingerprint(f *os.File, length int) (string, error) {
 	}
 	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
 }
-
-var ingestSignals = []string{"traces", "metrics", "logs"}
 
 func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 	tx, err := db.Begin()
@@ -112,11 +113,14 @@ func ingestFileTx(tx *sql.Tx, signal, path string, rep *SignalReport) error {
 	}
 	reader := bufio.NewReaderSize(f, 1<<20)
 	rep.Files++
-	stmt, err := tx.Prepare(ingestStatements[signal])
-	if err != nil {
-		return err
+	var stmt *sql.Stmt
+	if statement, ok := ingestStatements[signal]; ok {
+		stmt, err = tx.Prepare(statement)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
 	}
-	defer stmt.Close()
 	var consumed int64
 	// Restrict this transaction to the file size observed above.
 	remaining := stat.Size() - offset
@@ -134,10 +138,19 @@ func ingestFileTx(tx *sql.Tx, signal, path string, rep *SignalReport) error {
 		consumed += int64(len(line))
 		remaining -= int64(len(line))
 		rep.Lines++
-		var envelope map[string]json.RawMessage
-		root := map[string]string{"traces": "resourceSpans", "metrics": "resourceMetrics", "logs": "resourceLogs"}[signal]
-		if json.Unmarshal(line, &envelope) != nil || envelope[root] == nil {
+		envelopes, parseErr := splitOTLPEnvelopes(signal, line)
+		if parseErr != nil {
 			rep.SkippedLines++
+			continue
+		}
+		for _, envelope := range envelopes {
+			if _, err := tx.Exec(`INSERT INTO otlp_envelopes VALUES (?,?,CAST(? AS UBIGINT),CAST(? AS UBIGINT),?)`, signal, envelope.ServiceName, nullableNano(envelope.FirstTimeUnixNano), nullableNano(envelope.LastTimeUnixNano), string(envelope.Payload)); err != nil {
+				return fmt.Errorf("inserting OTLP envelope: %w", err)
+			}
+			rep.OTLPEnvelopes++
+		}
+		if signal == "profiles" {
+			rep.Records += countProfileRecords(envelopes)
 			continue
 		}
 		var records, skipped int
@@ -154,12 +167,12 @@ func ingestFileTx(tx *sql.Tx, signal, path string, rep *SignalReport) error {
 		}
 		rep.Records += records
 		if skipped < 0 {
-			rep.SkippedLines++
+			rep.ProjectionSkippedLines++
 		} else {
 			rep.SkippedRecords += skipped
 		}
 	}
-	_, err = tx.Exec("INSERT INTO ingest_state VALUES (?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(path) DO UPDATE SET byte_offset=excluded.byte_offset,fingerprint=excluded.fingerprint,fingerprint_len=excluded.fingerprint_len,updated_at=excluded.updated_at", path, offset+consumed, fingerprint, length)
+	_, err = tx.Exec("INSERT INTO ingest_state (path,byte_offset,fingerprint,fingerprint_len,updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(path) DO UPDATE SET byte_offset=excluded.byte_offset,fingerprint=excluded.fingerprint,fingerprint_len=excluded.fingerprint_len,updated_at=excluded.updated_at", path, offset+consumed, fingerprint, length)
 	if err != nil {
 		return err
 	}

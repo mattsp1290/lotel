@@ -54,7 +54,7 @@ func TestExampleConfigsValidate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		output, err := exec.Command("docker", "run", "--rm", "-v", absolute+":/c.yaml:ro", testCollectorImage, "validate", "--config=/c.yaml").CombinedOutput()
+		output, err := exec.Command("docker", "run", "--rm", "-v", absolute+":/c.yaml:ro", testCollectorImage, "validate", "--config=/c.yaml", "--feature-gates=+service.profilesSupport").CombinedOutput()
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", path, err, output)
 		}

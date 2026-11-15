@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 // ReingestAll atomically rebuilds indexed telemetry from retained JSONL files.
@@ -14,13 +15,22 @@ func ReingestAll(db *sql.DB, dataPath string) (*IngestReport, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	for _, table := range append([]string{"ingest_state"}, ingestSignals...) {
+	// Reusing cursor rows avoids DuckDB dropping deleted keys during a same-transaction upsert.
+	if _, err := tx.Exec("UPDATE ingest_state SET byte_offset=0"); err != nil {
+		return nil, fmt.Errorf("resetting ingestion progress: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM otlp_envelopes"); err != nil {
+		return nil, fmt.Errorf("clearing OTLP envelopes: %w", err)
+	}
+	for table := range ingestStatements {
 		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 			return nil, fmt.Errorf("clearing %s: %w", table, err)
 		}
 	}
 	report := &IngestReport{Signals: map[string]*SignalReport{}}
-	for _, signal := range ingestSignals {
+	var cursorPaths []any
+	for _, descriptor := range otlpSignals {
+		signal := descriptor.name
 		rep := &SignalReport{}
 		report.Signals[signal] = rep
 		path, err := filepath.Abs(filepath.Join(dataPath, signal, signal+".jsonl"))
@@ -30,6 +40,16 @@ func ReingestAll(db *sql.DB, dataPath string) (*IngestReport, error) {
 		if err := ingestFileTx(tx, signal, path, rep); err != nil {
 			return nil, fmt.Errorf("reingesting %s: %w", signal, err)
 		}
+		if rep.Files > 0 {
+			cursorPaths = append(cursorPaths, path)
+		}
+	}
+	deleteCursors := "DELETE FROM ingest_state"
+	if len(cursorPaths) > 0 {
+		deleteCursors += " WHERE path NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(cursorPaths)), ",") + ")"
+	}
+	if _, err := tx.Exec(deleteCursors, cursorPaths...); err != nil {
+		return nil, fmt.Errorf("clearing obsolete ingestion progress: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
