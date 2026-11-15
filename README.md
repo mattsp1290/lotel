@@ -291,7 +291,11 @@ streams. This does not validate every semantic rule for unrelated metric values.
 The database materializes the bounded payload scan (up to 64 MiB of payload plus
 query and decoding overhead); metadata and payload each require a table scan.
 The metadata limit bounds matching rows, with database vector read-ahead; it does
-not bound scanning unrelated rows.
+not bound scanning unrelated rows. The command uses a 30-second context
+for selection and database work; DuckDB execution is interruptible. Cancellation
+is cooperative during JSON scanning and validation. An individual protobuf decode
+is size-bounded but cannot be interrupted mid-decode, and database open/close and
+selector file I/O may also extend beyond the deadline.
 `lotel diagnose runtime` reads the recorded runtime state and requests its
 status without creating files or opening the database. A missing state file
 means no runtime is recorded. The state must be a regular file, not a symbolic

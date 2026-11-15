@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -128,17 +129,23 @@ func decodeMetricEnvelope(data []byte) (*metricpb.MetricsData, error) {
 	}
 	return m, nil
 }
-func parseMetricSelection(data []byte) (metricSelection, error) {
+func parseMetricSelection(ctx context.Context, data []byte) (metricSelection, error) {
 	var id metricSelection
 	if len(data) > MetricSelectorByteLimit {
 		return id, fmt.Errorf("metric selector exceeds size limit")
 	}
-	budget := metricJSONBudget{maxPoints: 1}
+	budget := metricJSONBudget{maxPoints: 1, ctx: ctx}
 	if err := budget.scan(data); err != nil {
 		return id, err
 	}
 	m, err := decodeMetricEnvelope(data)
 	if err != nil {
+		return id, err
+	}
+	if err := ctx.Err(); err != nil {
+		return id, err
+	}
+	if err := validateMetricEnvelope(ctx, m); err != nil {
 		return id, err
 	}
 	if len(m.ResourceMetrics) != 1 || m.ResourceMetrics[0] == nil {
@@ -189,9 +196,11 @@ func parseMetricSelection(data []byte) (metricSelection, error) {
 	return id, nil
 }
 
-func ValidateMetricSelector(data []byte) error {
-	_, err := parseMetricSelection(data)
-	return err
+type MetricSelector struct{ identity metricSelection }
+
+func PrepareMetricSelector(ctx context.Context, data []byte) (MetricSelector, error) {
+	id, err := parseMetricSelection(ctx, data)
+	return MetricSelector{identity: id}, err
 }
 
 func canonicalAttributeMap(attrs []*commonpb.KeyValue) (map[string][]byte, error) {

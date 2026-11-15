@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,9 +12,15 @@ type metricJSONBudget struct {
 	points    int
 	tokens    int
 	maxPoints int
+	ctx       context.Context
 }
 
 func (budget *metricJSONBudget) token(decoder *json.Decoder) (json.Token, error) {
+	if budget.ctx != nil {
+		if err := budget.ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	budget.tokens++
 	if budget.tokens > metricJSONTokenLimit {
 		return nil, fmt.Errorf("indeterminate: metric JSON work limit exceeded")

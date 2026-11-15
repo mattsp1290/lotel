@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/mattsp1290/lotel/internal/storage"
 	"github.com/spf13/cobra"
@@ -19,6 +20,9 @@ func metricDifferenceCommand() *cobra.Command {
 		Short: "Compare two observed cumulative integer sum points (JSON)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			cmd.SetContext(ctx)
 			from, err := strconv.ParseUint(fromText, 10, 64)
 			if err != nil || from == 0 {
 				return fmt.Errorf("--from-ns must be nonzero Unix nanoseconds")
@@ -42,20 +46,13 @@ func metricDifferenceCommand() *cobra.Command {
 			if len(input) > storage.MetricSelectorByteLimit {
 				return fmt.Errorf("metric selector exceeds size limit")
 			}
-			if err := storage.ValidateMetricSelector(input); err != nil {
+			prepared, err := storage.PrepareMetricSelector(ctx, input)
+			if err != nil {
 				return fmt.Errorf("invalid metric selector: %w", err)
 			}
-			var result storage.MetricDifference
-			if err := withDatabase(func(_ *cobra.Command, _ []string, db *sql.DB) error {
-				var queryErr error
-				result, queryErr = storage.QueryMetricDifference(db, input, from, to)
-				return queryErr
-			})(cmd, args); err != nil {
-				return err
-			}
-			encoder := json.NewEncoder(cmd.OutOrStdout())
-			encoder.SetIndent("", "  ")
-			return encoder.Encode(result)
+			return withDatabaseJSON(func(_ *cobra.Command, _ []string, db *sql.DB) (any, error) {
+				return storage.QueryMetricDifference(ctx, db, prepared, from, to)
+			}, true)(cmd, args)
 		},
 	}
 	cmd.Flags().StringVar(&selector, "selector", "", "path to single-stream OTLP JSON selector (required)")

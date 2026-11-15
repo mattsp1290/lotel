@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"fmt"
 	"math/big"
@@ -169,26 +170,22 @@ func visitMetricPoints(metric *metricpb.Metric, visit func(metricPointAttributes
 	return nil
 }
 
-func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]metricObservation, error) {
-	id, err := parseMetricSelection(selector)
-	if err != nil {
-		return nil, fmt.Errorf("invalid selector: %w", err)
-	}
+func observedMetricPoints(ctx context.Context, db *sql.DB, id metricSelection, from, to uint64) ([]metricObservation, error) {
 	if from == 0 || to == 0 || from >= to {
 		return nil, fmt.Errorf("point timestamps must be nonzero and increasing")
 	}
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	size, err := metricEnvelopePreflight(tx)
+	size, err := metricEnvelopePreflight(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	var points []metricObservation
-	budget := metricJSONBudget{}
-	err = visitMetricEnvelopes(tx, size, func(raw []byte) error {
+	budget := metricJSONBudget{ctx: ctx}
+	err = visitMetricEnvelopes(ctx, tx, size, func(raw []byte) error {
 		if err := budget.scan(raw); err != nil {
 			return err
 		}
@@ -196,10 +193,13 @@ func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]metri
 		if err != nil {
 			return fmt.Errorf("indeterminate: unsupported or malformed retained metrics envelope: %w", err)
 		}
-		if err := validateMetricEnvelope(data); err != nil {
+		if err := validateMetricEnvelope(ctx, data); err != nil {
 			return err
 		}
 		for _, resource := range data.ResourceMetrics {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if resource == nil {
 				return fmt.Errorf("indeterminate: missing resource envelope")
 			}
@@ -211,6 +211,9 @@ func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]metri
 				continue
 			}
 			for _, scope := range resource.ScopeMetrics {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if scope == nil {
 					return fmt.Errorf("indeterminate: missing scope envelope")
 				}
@@ -222,6 +225,9 @@ func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]metri
 					continue
 				}
 				for _, metric := range scope.Metrics {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
 					if metric == nil {
 						return fmt.Errorf("indeterminate: missing metric")
 					}
@@ -229,6 +235,9 @@ func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]metri
 						continue
 					}
 					err := visitMetricPoints(metric, func(attrs metricPointAttributes, point *metricpb.NumberDataPoint, validType bool) error {
+						if err := ctx.Err(); err != nil {
+							return err
+						}
 						pointRelation := metricPointRelation(attrs.GetAttributes(), id)
 						if pointRelation == metricIdentityDisjoint {
 							return nil
@@ -270,15 +279,18 @@ func observedMetricPoints(db *sql.DB, selector []byte, from, to uint64) ([]metri
 	return points, nil
 }
 
-func QueryMetricDifference(db *sql.DB, selector []byte, from, to uint64) (MetricDifference, error) {
+func QueryMetricDifference(ctx context.Context, db *sql.DB, selector MetricSelector, from, to uint64) (MetricDifference, error) {
 	result := MetricDifference{}
-	points, err := observedMetricPoints(db, selector, from, to)
+	points, err := observedMetricPoints(ctx, db, selector.identity, from, to)
 	if err != nil {
 		return result, err
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].timestamp < points[j].timestamp })
 	var first, last *metricObservation
 	for i := range points {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		if points[i].timestamp == from {
 			if first != nil {
 				return result, fmt.Errorf("indeterminate: duplicate first endpoint")
@@ -301,6 +313,9 @@ func QueryMetricDifference(db *sql.DB, selector []byte, from, to uint64) (Metric
 	start := first.start
 	var previous *metricObservation
 	for i := range points {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		point := &points[i]
 		if point.start > point.timestamp {
 			return result, fmt.Errorf("indeterminate: point has invalid start time")
@@ -324,6 +339,9 @@ func QueryMetricDifference(db *sql.DB, selector []byte, from, to uint64) (Metric
 			return result, fmt.Errorf("indeterminate: duplicate or decreasing cumulative point")
 		}
 		previous = point
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
 	}
 	difference := new(big.Int).Sub(big.NewInt(last.value), big.NewInt(first.value))
 	result = MetricDifference{FromUnixNano: fmt.Sprint(from), ToUnixNano: fmt.Sprint(to), Difference: difference.String(), ElapsedNano: fmt.Sprint(to - from), Assumptions: []string{"Observed retained points only; ingestion or retention may be incomplete.", "The selected stream is assumed to have a single writer."}}

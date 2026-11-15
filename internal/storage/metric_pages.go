@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
@@ -9,14 +10,17 @@ type metricEnvelopeSize struct{ count, bytes int }
 
 // DuckDB materializes query results before returning rows. Preflight metadata
 // first, then issue one payload query capped by the same transaction snapshot.
-func metricEnvelopePreflight(tx *sql.Tx) (metricEnvelopeSize, error) {
-	rows, err := tx.Query(`SELECT strlen(CAST(payload AS VARCHAR)) FROM otlp_envelopes WHERE signal='metrics' LIMIT ?`, metricEnvelopeLimit+1)
+func metricEnvelopePreflight(ctx context.Context, tx *sql.Tx) (metricEnvelopeSize, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT strlen(CAST(payload AS VARCHAR)) FROM otlp_envelopes WHERE signal='metrics' LIMIT ?`, metricEnvelopeLimit+1)
 	if err != nil {
 		return metricEnvelopeSize{}, fmt.Errorf("querying metric envelope metadata: %w", err)
 	}
 	defer rows.Close()
 	var size metricEnvelopeSize
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return metricEnvelopeSize{}, err
+		}
 		var n int
 		if err := rows.Scan(&n); err != nil {
 			return size, err
@@ -36,14 +40,17 @@ func metricEnvelopePreflight(tx *sql.Tx) (metricEnvelopeSize, error) {
 	return size, rows.Err()
 }
 
-func visitMetricEnvelopes(tx *sql.Tx, expected metricEnvelopeSize, visit func([]byte) error) error {
-	rows, err := tx.Query(`SELECT CAST(payload AS VARCHAR) FROM otlp_envelopes WHERE signal='metrics'`)
+func visitMetricEnvelopes(ctx context.Context, tx *sql.Tx, expected metricEnvelopeSize, visit func([]byte) error) error {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(payload AS VARCHAR) FROM otlp_envelopes WHERE signal='metrics'`)
 	if err != nil {
 		return fmt.Errorf("querying metric envelopes: %w", err)
 	}
 	defer rows.Close()
 	var actual metricEnvelopeSize
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
 			return err

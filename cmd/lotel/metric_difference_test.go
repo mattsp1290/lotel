@@ -124,6 +124,17 @@ func TestMetricDifferenceCLI(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".lotel")); !os.IsNotExist(err) {
 		t.Fatalf("invalid selector opened database: %v", err)
 	}
+	malformed := strings.Replace(differenceSelector, `"attributes":[]`, `"attributes":[],"exemplars":[{"filteredAttributes":[{"value":{"boolValue":true}}]}]`, 1)
+	if err := os.WriteFile(badSelector, []byte(malformed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err = invokeMetricDifference(t, home, "--selector", badSelector, "--from-ns", "1", "--to-ns", "2")
+	if err == nil || out != "" || !strings.Contains(stderr, "selector") {
+		t.Fatalf("malformed selector: %q %q %v", out, stderr, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".lotel")); !os.IsNotExist(err) {
+		t.Fatalf("malformed selector opened database: %v", err)
+	}
 	out, stderr, err = invokeMetricDifference(t, home, args...)
 	if err == nil || out != "" || !strings.Contains(stderr, "indeterminate") {
 		t.Fatalf("missing evidence: %q %q %v", out, stderr, err)

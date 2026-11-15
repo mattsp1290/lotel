@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -8,9 +9,12 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-func validateMetricEnvelope(data *metricpb.MetricsData) error {
+func validateMetricEnvelope(ctx context.Context, data *metricpb.MetricsData) error {
 	var walk func(protoreflect.Message) error
 	walk = func(message protoreflect.Message) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var walkErr error
 		message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
 			if field.IsList() {
@@ -18,6 +22,10 @@ func validateMetricEnvelope(data *metricpb.MetricsData) error {
 				if field.Kind() == protoreflect.MessageKind && field.Message().FullName() == "opentelemetry.proto.common.v1.KeyValue" {
 					attrs := make([]*commonpb.KeyValue, 0, list.Len())
 					for i := 0; i < list.Len(); i++ {
+						if err := ctx.Err(); err != nil {
+							walkErr = err
+							return false
+						}
 						kv, ok := list.Get(i).Message().Interface().(*commonpb.KeyValue)
 						if !ok || kv == nil {
 							walkErr = fmt.Errorf("invalid attribute")
@@ -31,6 +39,10 @@ func validateMetricEnvelope(data *metricpb.MetricsData) error {
 					}
 				}
 				for i := 0; i < list.Len(); i++ {
+					if err := ctx.Err(); err != nil {
+						walkErr = err
+						return false
+					}
 					if field.Kind() == protoreflect.MessageKind {
 						if err := walk(list.Get(i).Message()); err != nil {
 							walkErr = err
@@ -59,6 +71,9 @@ func validateMetricEnvelope(data *metricpb.MetricsData) error {
 		return fmt.Errorf("indeterminate: malformed retained metrics envelope: %w", err)
 	}
 	for _, resource := range data.ResourceMetrics {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if resource == nil {
 			return fmt.Errorf("indeterminate: missing resource envelope")
 		}
@@ -73,7 +88,7 @@ func validateMetricEnvelope(data *metricpb.MetricsData) error {
 				if metric == nil || metric.Name == "" || metric.Data == nil {
 					return fmt.Errorf("indeterminate: malformed metric")
 				}
-				if err := visitMetricPoints(metric, func(metricPointAttributes, *metricpb.NumberDataPoint, bool) error { return nil }); err != nil {
+				if err := visitMetricPoints(metric, func(metricPointAttributes, *metricpb.NumberDataPoint, bool) error { return ctx.Err() }); err != nil {
 					return err
 				}
 			}
