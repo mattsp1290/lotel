@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Dry-run version, vX.Y.Z
+        required: true
+        default: v0.0.0
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'push' && 'lotel-release' || format('lotel-dry-{0}', github.ref) }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+  CGO_ENABLED: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate version and release ancestry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            [[ "$(git cat-file -t "refs/tags/$RELEASE_TAG")" == tag ]]
+            git merge-base --is-ancestor "$RELEASE_TAG^{commit}" origin/main
+            gh release list --limit 1000 --json tagName,isDraft,isPrerelease > releases.json
+            python3 - "$RELEASE_TAG" <<'PY'
+          import json, re, sys
+          tag = sys.argv[1]
+          version = tuple(map(int, tag[1:].split('.')))
+          for release in json.load(open('releases.json')):
+              if release['tagName'] == tag:
+                  sys.exit('release already exists; use a new version')
+              if not release['isDraft'] and not release['isPrerelease'] and re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', release['tagName']):
+                  if tuple(map(int, release['tagName'][1:].split('.'))) >= version:
+                      sys.exit('release version must be newer than every published stable release')
+          PY
+          fi
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: linux-x86_64
+          - runner: ubuntu-22.04-arm
+            target: linux-aarch64
+          - runner: macos-15-intel
+            target: macos-x86_64
+          - runner: macos-15
+            target: macos-aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test and build native release executable
+        env:
+          TARGET: ${{ matrix.target }}
+          MACOSX_DEPLOYMENT_TARGET: '15.0'
+        run: |
+          go test ./...
+          go build ./...
+          go vet ./...
+          mkdir dist
+          go build -ldflags "-s -w -X main.version=$RELEASE_TAG -X main.distribution=release" -o "dist/lotel-$TARGET" ./cmd/lotel
+          [[ "$("dist/lotel-$TARGET" --version)" == "lotel $RELEASE_TAG" ]]
+          smoke_home=$(mktemp -d)
+          HOME="$smoke_home" "dist/lotel-$TARGET" query traces --since 1m
+          python3 distribution/tests/run_tests.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lotel-${{ matrix.target }}
+          path: dist/lotel-${{ matrix.target }}
+          if-no-files-found: error
+  package:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lotel-*
+          path: dist
+          merge-multiple: true
+      - name: Write release manifest
+        run: |
+          python3 distribution/manifest.py --tag "$RELEASE_TAG" --base-url "https://github.com/$GITHUB_REPOSITORY/releases" --dir dist --output dist/lotel-manifest.json
+          cp distribution/install.sh dist/install.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    if: github.event_name == 'push'
+    needs: package
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+      - name: Publish release after all target checks pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$RELEASE_TAG" --draft --verify-tag --title "lotel $RELEASE_TAG" --generate-notes dist/*
+          gh release edit "$RELEASE_TAG" --draft=false --latest

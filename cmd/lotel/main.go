@@ -16,19 +16,26 @@ import (
 	"github.com/mattsp1290/lotel/internal/storage"
 )
 
+var version = "dev"
+var distribution = "source"
+
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "lotel",
-		Short: "Local OpenTelemetry — manage a collector and query telemetry",
+		Use:     "lotel",
+		Version: version,
+		Short:   "Local OpenTelemetry — manage a collector and query telemetry",
 	}
+
+	rootCmd.SetVersionTemplate("lotel {{.Version}}\n")
 
 	// --- start ---
 	var waitHealthy bool
+	var collectorConfig string
 	startCmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the OTel Collector container",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, dataPath, err := config.ResolvePaths()
+			configPath, dataPath, err := config.ResolvePathsWithConfig(collectorConfig)
 			if err != nil {
 				return err
 			}
@@ -46,6 +53,7 @@ func main() {
 			return nil
 		},
 	}
+	startCmd.Flags().StringVar(&collectorConfig, "config", "", "use an explicit Collector config path")
 	startCmd.Flags().BoolVar(&waitHealthy, "wait", false, "wait for collector to become healthy before returning")
 
 	// --- stop ---
@@ -297,7 +305,7 @@ func main() {
 	pruneCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be pruned without deleting")
 	pruneCmd.Flags().BoolVar(&pruneAll, "all", false, "delete all telemetry data")
 
-	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, pruneCmd)
+	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, pruneCmd, upgradeCommand())
 
 	ctx := context.Background()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
