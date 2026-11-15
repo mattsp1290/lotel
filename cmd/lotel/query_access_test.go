@@ -27,6 +27,7 @@ func TestQueryCommandsWaitForIngestionAndReleaseDatabase(t *testing.T) {
 	commands := [][]string{
 		{"query", "services"},
 		{"query", "operations"},
+		{"query", "dependencies", "--since", at, "--until", at},
 		{"query", "span-stats", "--since", at, "--until", at},
 		{"query", "log-stats", "--since", at, "--until", at},
 		{"query", "trace", traceID, "--relationships"},
@@ -57,6 +58,11 @@ func TestQueryCommandsWaitForIngestionAndReleaseDatabase(t *testing.T) {
 			return ctx.Err()
 		}
 		if _, err := db.Exec(`INSERT INTO traces (trace_id, span_id, name, kind, start_time, end_time, duration_ns, status_code, service_name, date) VALUES (?, 'bbbbbbbbbbbbbbbb', 'request', 1, ?, ?, 123, 2, 'locked-query', '2025-01-02')`, traceID, at, at); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`INSERT INTO traces (trace_id, span_id, parent_span_id, name, kind, start_time, end_time, service_name, date) VALUES
+			('cccccccccccccccccccccccccccccccc', '1111111111111111', NULL, 'client', 3, ?, ?, 'locked-source', '2025-01-02'),
+			('cccccccccccccccccccccccccccccccc', '2222222222222222', '1111111111111111', 'server', 2, ?, ?, 'locked-query', '2025-01-02')`, at, at, at, at); err != nil {
 			return err
 		}
 		_, err := db.Exec(`INSERT INTO logs (timestamp, severity_number, body, trace_id, span_id, service_name, date) VALUES (?, 17, 'ready', ?, 'bbbbbbbbbbbbbbbb', 'locked-query', '2025-01-02')`, at, traceID)

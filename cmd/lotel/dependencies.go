@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -22,16 +23,13 @@ func dependenciesCommand() *cobra.Command {
 			if !validBoundedWindow(start, end, now) {
 				return fmt.Errorf("invalid dependency window")
 			}
-			db, err := openDB()
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-			report, err := storage.QueryDependencies(db, storage.DependencyOptions{Since: start, Until: end})
-			if err != nil {
-				return err
-			}
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+			return withDatabase(func(cmd *cobra.Command, args []string, db *sql.DB) error {
+				report, err := storage.QueryDependencies(db, storage.DependencyOptions{Since: start, Until: end})
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+			})(cmd, args)
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "", "inclusive start (RFC3339 or positive duration, required)")
