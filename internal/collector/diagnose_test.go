@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -179,7 +180,7 @@ func TestDiagnoseRuntimeTimeout(t *testing.T) {
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })}
 	go server.Serve(listener)
 	t.Cleanup(func() { server.Close() })
-	data, _ := json.Marshal(State{Backend: "native", ControlSocket: socket, ControlToken: "token"})
+	data, _ := json.Marshal(State{Backend: "native", PID: 1234, ControlSocket: socket, ControlToken: "token"})
 	if err := os.WriteFile(filepath.Join(home, stateDir, stateFile), data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -189,5 +190,111 @@ func TestDiagnoseRuntimeTimeout(t *testing.T) {
 	got := DiagnoseRuntime(ctx)
 	if got.Runtime.Observation != "unavailable" || time.Since(start) > time.Second {
 		t.Fatalf("timeout: %+v", got)
+	}
+}
+
+func TestDiagnoseRuntimeRequiresPIDAndRejectsRedirect(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix runtime socket")
+	}
+	home, err := os.MkdirTemp("", "lotel-diag-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, stateDir)
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(home, "control.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const secret = "runtime-auth-secret"
+	var requests, redirected atomic.Int32
+	var redirect atomic.Bool
+	var incorrectAuth atomic.Bool
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Header.Get("Authorization") != "Bearer "+secret {
+			incorrectAuth.Store(true)
+		}
+		if r.URL.Path != "/status" {
+			redirected.Add(1)
+		}
+		if redirect.Load() && r.URL.Path == "/status" {
+			w.Header().Set("Location", "/redirected")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"backend":"native","pid":1234,"running":true,"healthy":true,"ingestion":{"enabled":false,"running":false,"interval":"2s"}}`))
+	})}
+	go server.Serve(listener)
+	t.Cleanup(func() { server.Close() })
+	path := filepath.Join(dir, stateFile)
+	for _, tc := range []struct {
+		name    string
+		pid     any
+		include bool
+	}{
+		{"missing", nil, false},
+		{"null", nil, true},
+		{"zero", 0, true},
+		{"negative", -1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := map[string]any{"backend": "native", "control_socket": socket, "control_token": secret}
+			if tc.include {
+				state["pid"] = tc.pid
+			}
+			data, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			before := requests.Load()
+			got := DiagnoseRuntime(context.Background())
+			encoded, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.StateFile.Observation != "present" || got.Runtime.Observation != "unknown" || got.Runtime.Reason != "state_invalid" || got.Ingestion.Observation != "unknown" || requests.Load() != before {
+				t.Fatalf("invalid PID was accepted: %s", encoded)
+			}
+			if strings.Contains(string(encoded), secret) || strings.Contains(string(encoded), socket) {
+				t.Fatalf("leaked runtime state: %s", encoded)
+			}
+		})
+	}
+	state, err := json.Marshal(State{Backend: "native", PID: 1234, ControlSocket: socket, ControlToken: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, state, 0600); err != nil {
+		t.Fatal(err)
+	}
+	before := requests.Load()
+	got := DiagnoseRuntime(context.Background())
+	if got.Runtime.Observation != "available" || got.Ingestion.Observation != "available" || requests.Load() != before+1 {
+		t.Fatalf("valid runtime was not observed: %+v", got)
+	}
+	redirect.Store(true)
+	got = DiagnoseRuntime(context.Background())
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Runtime.Observation != "unavailable" || got.Runtime.Reason != "runtime_unavailable" || got.Ingestion.Observation != "unknown" || requests.Load() != before+2 || redirected.Load() != 0 || incorrectAuth.Load() {
+		t.Fatalf("redirect was followed or not reported: %s", encoded)
+	}
+	if strings.Contains(string(encoded), secret) || strings.Contains(string(encoded), socket) {
+		t.Fatalf("redirect diagnosis leaked runtime state: %s", encoded)
+	}
+	if after, err := os.ReadFile(path); err != nil || string(after) != string(state) {
+		t.Fatalf("diagnosis modified state: %v", err)
 	}
 }

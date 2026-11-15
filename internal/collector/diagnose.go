@@ -100,18 +100,18 @@ func DiagnoseRuntime(ctx context.Context) RuntimeDiagnosis {
 		return report
 	}
 	report.StateFile = DiagnosisState{Observation: "present"}
-	if (state.Backend != "native" && state.Backend != "docker") || state.PID < 0 || state.ControlSocket == "" || state.ControlToken == "" {
+	if (state.Backend != "native" && state.Backend != "docker") || state.PID <= 0 || state.ControlSocket == "" || state.ControlToken == "" {
 		report.Runtime.Reason = "state_invalid"
 		return report
 	}
-	response, err := runtimeControlRequest(ctx, &state, http.MethodGet, "/status", 2*time.Second)
+	response, err := runtimeControlRequest(ctx, &state, http.MethodGet, "/status", 2*time.Second, func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse })
 	if err != nil {
 		report.Runtime = DiagnosisRuntime{Observation: "unavailable", Reason: "runtime_unavailable"}
 		return report
 	}
 	defer response.Body.Close()
 	var status diagnosticStatus
-	if err := decodeDiagnosis(response.Body, &status); err != nil || status.Backend != state.Backend || status.PID == nil || *status.PID <= 0 || (state.PID != 0 && *status.PID != state.PID) || status.Running == nil || status.Healthy == nil || status.Ingestion == nil || status.Ingestion.Enabled == nil || status.Ingestion.Running == nil || status.Ingestion.Interval == nil {
+	if err := decodeDiagnosis(response.Body, &status); err != nil || status.Backend != state.Backend || status.PID == nil || *status.PID != state.PID || status.Running == nil || status.Healthy == nil || status.Ingestion == nil || status.Ingestion.Enabled == nil || status.Ingestion.Running == nil || status.Ingestion.Interval == nil {
 		report.Runtime = DiagnosisRuntime{Observation: "unavailable", Reason: "invalid_response"}
 		return report
 	}
