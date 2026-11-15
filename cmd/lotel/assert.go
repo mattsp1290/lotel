@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 )
 
 var errAssertionFailed = errors.New("no matching signal")
+var assertionTimestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$`)
 
 type signalAssertionResult struct {
 	Passed          bool       `json:"passed"`
@@ -23,8 +25,15 @@ type signalAssertionResult struct {
 	LatestTimestamp *time.Time `json:"latest_timestamp,omitempty"`
 }
 
+func parseAssertionTimestamp(value string) (time.Time, error) {
+	if !assertionTimestampPattern.MatchString(value) {
+		return time.Time{}, fmt.Errorf("expected RFC3339 timestamp with at most nine fractional digits")
+	}
+	return time.Parse(time.RFC3339Nano, value)
+}
+
 func assertionSince(value string, now time.Time) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
+	if t, err := parseAssertionTimestamp(value); err == nil {
 		return t.UTC(), nil
 	}
 	var duration time.Duration
@@ -68,8 +77,8 @@ func assertCommand() *cobra.Command {
 				return fmt.Errorf("invalid --since: %w", err)
 			}
 			end := now
-			if until != "" {
-				end, err = time.Parse(time.RFC3339Nano, until)
+			if cmd.Flags().Changed("until") {
+				end, err = parseAssertionTimestamp(until)
 				if err != nil {
 					return fmt.Errorf("invalid --until: %w", err)
 				}

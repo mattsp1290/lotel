@@ -66,6 +66,16 @@ func TestAssertSignalCLI(t *testing.T) {
 			}
 		})
 	}
+	for _, timestamp := range []string{"2025-01-02T13:30:00.000000000+01:30", "2025-01-02T06:30:00-05:30"} {
+		out, stderr, err := invoke(home, "--signal", "logs", "--service", "app", "--since", timestamp, "--until", timestamp)
+		if err != nil || !strings.Contains(out, `"passed":true`) {
+			t.Fatalf("valid offset or precision rejected: %q %q %q %v", timestamp, out, stderr, err)
+		}
+	}
+	out, stderr, err := invoke(home, "--signal", "logs", "--service", "app", "--since", "2025-01-02T11:59:59.999999999Z", "--until", "2025-01-02T12:00:00.000000001Z")
+	if err != nil || !strings.Contains(out, `"passed":true`) {
+		t.Fatalf("valid nanosecond window rejected: %q %q %v", out, stderr, err)
+	}
 	for _, window := range []struct{ since, until time.Time }{
 		{at.Add(time.Nanosecond), at.Add(time.Second)},
 		{at.Add(-time.Second), at.Add(-time.Nanosecond)},
@@ -80,7 +90,7 @@ func TestAssertSignalCLI(t *testing.T) {
 			t.Fatalf("wrong window result: %q %v", out, err)
 		}
 	}
-	out, stderr, err := invoke(home, "--signal", "logs", "--service", "app", "--since", at.Add(time.Second).Format(time.RFC3339), "--until", at.Add(30*time.Minute).Format(time.RFC3339))
+	out, stderr, err = invoke(home, "--signal", "logs", "--service", "app", "--since", at.Add(time.Second).Format(time.RFC3339), "--until", at.Add(30*time.Minute).Format(time.RFC3339))
 	if err == nil || stderr != "" {
 		t.Fatalf("no match should fail without stderr: %v %q", err, stderr)
 	}
@@ -101,6 +111,13 @@ func TestAssertSignalCLI(t *testing.T) {
 		{"--signal", "logs", "--service", "app", "--since", "-1h"},
 		{"--signal", "logs", "--service", "app", "--since", "1day"},
 		{"--signal", "logs", "--service", "app", "--since", "999999999999999999999d"},
+		{"--signal", "logs", "--service", "app", "--since", "2025-01-02T12:00:00.0000000001Z", "--until", "2025-01-02T12:00:00Z"},
+		{"--signal", "logs", "--service", "app", "--since", "2025-01-03T12:00:00+24:00"},
+		{"--signal", "logs", "--service", "app", "--since", "2025-01-02T13:00:00+00:60"},
+		{"--signal", "logs", "--service", "app", "--since", "1h", "--until", ""},
+		{"--signal", "logs", "--service", "app", "--since", "1h", "--until", "2025-01-02T12:00:00.0000000001Z"},
+		{"--signal", "logs", "--service", "app", "--since", "1h", "--until", "2025-01-03T12:00:00+24:00"},
+		{"--signal", "logs", "--service", "app", "--since", "1h", "--until", "2025-01-02T13:00:00+00:60"},
 		{"--signal", "logs", "--service", "app", "--since", "2025-01-03T00:00:00Z", "--until", "2025-01-02T00:00:00Z"},
 		{"--signal", "logs", "--service", "app", "--since", "1h", "--until", "9999-01-01T00:00:00Z"},
 	} {
