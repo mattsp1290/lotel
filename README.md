@@ -203,6 +203,8 @@ lotel --version
 | `lotel ingest` | Incrementally ingest new JSONL telemetry (JSON report) |
 | `lotel ingest --full` | Atomically rebuild the index from retained JSONL |
 | `lotel query traces` | Query traces (JSON output) |
+| `lotel query services` | List observed services and their signals |
+| `lotel query operations` | List observed span names and kinds |
 | `lotel query trace <trace-id>` | Query a trace and its correlated logs (JSON output) |
 | `lotel query metrics` | Query metrics (JSON output) |
 | `lotel query logs` | Query logs (JSON output) |
@@ -223,6 +225,12 @@ All query commands except `query trace` support `--service`, `--since`, and `--u
 --until       End time (RFC3339)
 --limit       Max results
 ```
+
+Service discovery lists services observed in projected traces, metrics, and logs.
+It does not include profile-only services or establish whether a service is running.
+Operation discovery lists distinct projected span names and kinds by service. Both
+commands filter the observation window before grouping and apply the limit after
+sorting. Missing service names appear as `unknown`; empty names remain empty.
 
 Additional filters:
 
