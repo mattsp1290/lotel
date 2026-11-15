@@ -185,3 +185,159 @@ func TestMetricDifferenceSkipsUnrelatedNonfiniteAttributes(t *testing.T) {
 		t.Fatal("nonfinite selector accepted")
 	}
 }
+
+func TestMetricDifferenceRejectsLaterOverlappingEpoch(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	overlap := differenceTestPoint("40", "20", "3")
+	db := ingestMetricsForDifference(t, metricEnvelope("A", first+","+last+","+overlap))
+	if _, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30); err == nil {
+		t.Fatal("later point with overlapping epoch accepted")
+	}
+}
+
+func TestMetricDifferenceIgnoresProvablyDisjointIncompleteResources(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	selected := metricEnvelope("A", first+","+last)
+	other := strings.Replace(metricEnvelope("A", first), `"stringValue":"app"`, `"stringValue":"other"`, 1)
+	other = strings.Replace(other, `"resource":{"attributes":`, `"resource":{"droppedAttributesCount":1,"attributes":`, 1)
+	db := ingestMetricsForDifference(t, other, selected)
+	got, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30)
+	if err != nil || got.Difference != "10" {
+		t.Fatalf("disjoint incomplete resource: %+v %v", got, err)
+	}
+}
+
+func TestMetricDifferenceRejectsPossiblyMatchingIncompleteResources(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	selected := metricEnvelope("A", first+","+last)
+	uncertain := strings.Replace(metricEnvelope("A", first), `,{"key":"region","value":{"intValue":"7"}}`, "", 1)
+	uncertain = strings.Replace(uncertain, `"resource":{"attributes":`, `"resource":{"droppedAttributesCount":1,"attributes":`, 1)
+	db := ingestMetricsForDifference(t, uncertain, selected)
+	if _, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30); err == nil {
+		t.Fatal("possibly matching incomplete resource accepted")
+	}
+}
+
+func TestMetricDifferenceIgnoresUnknownFieldsInUnrelatedMetric(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	selected := metricEnvelope("A", first+","+last)
+	other := strings.Replace(metricEnvelope("A", first), `"name":"requests"`, `"name":"other","newField":42`, 1)
+	db := ingestMetricsForDifference(t, other, selected)
+	got, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30)
+	if err != nil || got.Difference != "10" {
+		t.Fatalf("unrelated metric: %+v %v", got, err)
+	}
+}
+
+func TestMetricDifferenceRejectsUnknownFieldsInPossiblyMatchingMetric(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	unknown := strings.Replace(metricEnvelope("A", first), `"name":"requests"`, `"name":"requests","newField":42`, 1)
+	db := ingestMetricsForDifference(t, unknown, metricEnvelope("A", first+","+last))
+	if _, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30); err == nil {
+		t.Fatal("unknown field in matching metric accepted")
+	}
+}
+
+func TestMetricDifferenceAcceptsNonoverlappingLaterEpoch(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	for _, tc := range []struct{ name, later string }{
+		{"same epoch", differenceTestPoint("40", "2", "20")},
+		{"later epoch", differenceTestPoint("40", "31", "1")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := ingestMetricsForDifference(t, metricEnvelope("A", first+","+last+","+tc.later))
+			got, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30)
+			if err != nil || got.Difference != "10" {
+				t.Fatalf("later point: %+v %v", got, err)
+			}
+		})
+	}
+}
+
+func TestMetricDifferenceRejectsLaterUnknownEpoch(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	later := strings.Replace(differenceTestPoint("40", "2", "20"), `"startTimeUnixNano":"2",`, "", 1)
+	db := ingestMetricsForDifference(t, metricEnvelope("A", first+","+last+","+later))
+	if _, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30); err == nil {
+		t.Fatal("later point with unknown start accepted")
+	}
+}
+
+func TestMetricDifferenceIgnoresUnknownSiblingMetric(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	data := strings.Replace(metricEnvelope("A", first+","+last), `"metrics":[`, `"metrics":[{"name":"other","newField":42},`, 1)
+	db := ingestMetricsForDifference(t, data)
+	got, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30)
+	if err != nil || got.Difference != "10" {
+		t.Fatalf("unrelated sibling metric: %+v %v", got, err)
+	}
+}
+
+func TestMetricDifferenceHandlesIncompleteScopes(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	selected := metricEnvelope("A", first+","+last)
+	disjoint := strings.Replace(metricEnvelope("A", first), `"scope":{"name":"sdk","version":"1","attributes":`, `"scope":{"name":"sdk","version":"1","droppedAttributesCount":1,"attributes":`, 1)
+	disjoint = strings.Replace(disjoint, `"stringValue":"A"`, `"stringValue":"B"`, 1)
+	t.Run("disjoint", func(t *testing.T) {
+		db := ingestMetricsForDifference(t, disjoint, selected)
+		got, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30)
+		if err != nil || got.Difference != "10" {
+			t.Fatalf("disjoint scope: %+v %v", got, err)
+		}
+	})
+	uncertain := strings.Replace(metricEnvelope("A", first), `"scope":{"name":"sdk","version":"1","attributes":[{"key":"tenant","value":{"stringValue":"A"}}]}`, `"scope":{"name":"sdk","version":"1","droppedAttributesCount":1}`, 1)
+	t.Run("possibly matching", func(t *testing.T) {
+		db := ingestMetricsForDifference(t, uncertain, selected)
+		if _, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30); err == nil {
+			t.Fatal("possibly matching incomplete scope accepted")
+		}
+	})
+}
+
+func TestMetricDifferenceRejectsOversizedEnvelope(t *testing.T) {
+	db, err := OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oversized := `{"resourceMetrics":[],"padding":"` + strings.Repeat("x", metricEnvelopeCharLimit) + `"}`
+	if _, err := db.Exec(`INSERT INTO otlp_envelopes (signal,service_name,payload) VALUES ('metrics','other',?)`, oversized); err != nil {
+		t.Fatal(err)
+	}
+	selector := metricEnvelope("A", differenceTestPoint("10", "2", "7"))
+	if _, err := QueryMetricDifference(db, []byte(selector), 10, 30); err == nil || !strings.Contains(err.Error(), "size limit") {
+		t.Fatalf("oversized envelope: %v", err)
+	}
+}
+
+func TestMetricDifferenceIgnoresUnknownMetricInDisjointIncompleteResource(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	other := strings.Replace(metricEnvelope("A", first), `"stringValue":"app"`, `"stringValue":"other"`, 1)
+	other = strings.Replace(other, `"resource":{"attributes":`, `"resource":{"droppedAttributesCount":1,"attributes":`, 1)
+	other = strings.Replace(other, `"name":"requests"`, `"name":"requests","newField":42`, 1)
+	db := ingestMetricsForDifference(t, other, metricEnvelope("A", first+","+last))
+	got, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30)
+	if err != nil || got.Difference != "10" {
+		t.Fatalf("disjoint resource with unknown metric: %+v %v", got, err)
+	}
+}
+
+func TestMetricDifferenceRejectsInvalidEarlierInterval(t *testing.T) {
+	first := differenceTestPoint("10", "2", "7")
+	last := differenceTestPoint("30", "2", "17")
+	invalid := differenceTestPoint("9", "20", "1")
+	db := ingestMetricsForDifference(t, metricEnvelope("A", first+","+last+","+invalid))
+	if _, err := QueryMetricDifference(db, []byte(metricEnvelope("A", first)), 10, 30); err == nil {
+		t.Fatal("invalid earlier interval accepted")
+	}
+}

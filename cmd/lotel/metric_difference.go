@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 
@@ -26,9 +27,20 @@ func metricDifferenceCommand() *cobra.Command {
 			if err != nil || to <= from {
 				return fmt.Errorf("--to-ns must be later Unix nanoseconds")
 			}
-			input, err := os.ReadFile(selector)
+			file, err := os.Open(selector)
 			if err != nil {
 				return fmt.Errorf("reading metric selector: %w", err)
+			}
+			input, readErr := io.ReadAll(io.LimitReader(file, storage.MetricSelectorByteLimit+1))
+			closeErr := file.Close()
+			if readErr != nil {
+				return fmt.Errorf("reading metric selector: %w", readErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("closing metric selector: %w", closeErr)
+			}
+			if len(input) > storage.MetricSelectorByteLimit {
+				return fmt.Errorf("metric selector exceeds size limit")
 			}
 			if err := storage.ValidateMetricSelector(input); err != nil {
 				return fmt.Errorf("invalid metric selector: %w", err)

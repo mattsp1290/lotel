@@ -219,3 +219,88 @@ func TestMetricDifferenceReleasesLockBeforeOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMetricDifferenceCLIRejectsLaterOverlappingEpoch(t *testing.T) {
+	home := t.TempDir()
+	selector := filepath.Join(t.TempDir(), "selector.json")
+	if err := os.WriteFile(selector, []byte(differenceSelector), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(home, ".lotel", "data")
+	dir := filepath.Join(dataDir, "metrics")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	later := `"asInt":"9007199254741000"},{"timeUnixNano":"1700000000000000003","startTimeUnixNano":"1700000000000000001","asInt":"1"}]`
+	data := strings.Replace(differenceData, `"asInt":"9007199254741000"}]`, later, 1)
+	if data == differenceData {
+		t.Fatal("fixture replacement failed")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "metrics.jsonl"), []byte(data+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dataDir, "lotel.db")
+	if err := storage.WithDB(context.Background(), path, func(db *sql.DB) error { _, err := storage.IngestAll(db, dataDir); return err }); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err := invokeMetricDifference(t, home, "--selector", selector, "--from-ns", "1700000000000000001", "--to-ns", "1700000000000000002")
+	if err == nil || out != "" || !strings.Contains(stderr, "overlapping cumulative epoch") {
+		t.Fatalf("overlap accepted: %q %q %v", out, stderr, err)
+	}
+}
+
+func TestMetricDifferenceCLIRejectsOversizedSelectorBeforeDatabase(t *testing.T) {
+	home := t.TempDir()
+	selector := filepath.Join(t.TempDir(), "large.json")
+	if err := os.WriteFile(selector, bytes.Repeat([]byte(" "), storage.MetricSelectorByteLimit+1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err := invokeMetricDifference(t, home, "--selector", selector, "--from-ns", "1", "--to-ns", "2")
+	if err == nil || out != "" || !strings.Contains(stderr, "size limit") {
+		t.Fatalf("oversized selector accepted: %q %q %v", out, stderr, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".lotel")); !os.IsNotExist(err) {
+		t.Fatalf("invalid selector opened database: %v", err)
+	}
+}
+
+func TestMetricDifferenceCLISeparatesDisjointAndAmbiguousResources(t *testing.T) {
+	selector := filepath.Join(t.TempDir(), "selector.json")
+	if err := os.WriteFile(selector, []byte(differenceSelector), 0600); err != nil {
+		t.Fatal(err)
+	}
+	incomplete := strings.Replace(differenceData, `"resource":{"attributes":`, `"resource":{"droppedAttributesCount":1,"attributes":`, 1)
+	other := strings.Replace(incomplete, `"stringValue":"cli-test"`, `"stringValue":"other"`, 1)
+	other = strings.Replace(other, `"name":"requests"`, `"name":"requests","newField":42`, 1)
+	for _, tc := range []struct {
+		name, candidate string
+		wantSuccess     bool
+	}{
+		{"disjoint incomplete resource and unknown metric", other, true},
+		{"possibly matching incomplete resource", incomplete, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			dataDir := filepath.Join(home, ".lotel", "data")
+			dir := filepath.Join(dataDir, "metrics")
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "metrics.jsonl"), []byte(tc.candidate+"\n"+differenceData+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := storage.WithDB(context.Background(), filepath.Join(dataDir, "lotel.db"), func(db *sql.DB) error { _, err := storage.IngestAll(db, dataDir); return err }); err != nil {
+				t.Fatal(err)
+			}
+			out, stderr, err := invokeMetricDifference(t, home, "--selector", selector, "--from-ns", "1700000000000000001", "--to-ns", "1700000000000000002")
+			if tc.wantSuccess {
+				var result storage.MetricDifference
+				if err != nil || json.Unmarshal([]byte(out), &result) != nil || result.Difference != "7" {
+					t.Fatalf("disjoint resource blocked: %q %q %v", out, stderr, err)
+				}
+			} else if err == nil || out != "" || !strings.Contains(stderr, "indeterminate") {
+				t.Fatalf("ambiguous resource accepted: %q %q %v", out, stderr, err)
+			}
+		})
+	}
+}

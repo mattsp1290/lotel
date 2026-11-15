@@ -269,13 +269,17 @@ lotel query metric-difference --selector selector.json --from-ns 170000000000000
 The result contains decimal strings for the difference and elapsed nanoseconds.
 The command scans all retained metric envelopes. It returns an error when the
 selected points are missing, duplicated, flagged, reset, decreasing, or not
-integer values. It also rejects unsupported or ambiguous identity data, and
+integer values, or when a later point declares an overlapping cumulative epoch.
+It also rejects unsupported or ambiguous identity data, and
 conflicting metric types or temporalities with the same resource, scope, name,
 and unit. Dropped resource or scope attributes and resource entity references
 are unsupported. The result is an observed pair difference, not a rate or a
 complete-window total. It assumes a single writer. Ingestion or retention can
 leave history incomplete, including missing resets or missing-value markers.
 Complete OTLP history may require a full backfill from retained raw files.
+The selector is limited to 4 MiB. The scan stops with an indeterminate error
+after 100,000 envelopes, 4,194,304 characters in one envelope, 64 MiB of
+envelope data, 100,000 matching points, or 128 MiB of candidate processing.
 
 ## Query options
 
