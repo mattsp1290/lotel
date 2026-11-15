@@ -220,20 +220,21 @@ type otlpHistogramDP struct {
 }
 
 type metricPoint struct {
-	metricType                                                  string
-	value                                                       any
-	timestamp                                                   time.Time
-	startTimestamp                                              time.Time
-	temporality                                                 int
-	monotonic                                                   bool
-	attributes                                                  []otlpAttr
-	count                                                       any
-	sum, min, max                                               any
-	explicitBounds, bucketCounts                                any
-	expScale, expZeroCount, expPositive, expNegative, quantiles any
+	metricType                          string
+	value                               *float64
+	timestamp, startTimestamp           time.Time
+	temporality                         int
+	monotonic                           bool
+	attributes                          []otlpAttr
+	count                               *int64
+	sum, min, max                       *float64
+	explicitBounds, bucketCounts        *string
+	expScale                            *int
+	expZeroCount                        *int64
+	expPositive, expNegative, quantiles *string
 }
 
-func finiteDouble(d *otlpDouble) any {
+func finiteDouble(d *otlpDouble) *float64 {
 	if d == nil {
 		return nil
 	}
@@ -241,9 +242,9 @@ func finiteDouble(d *otlpDouble) any {
 	if math.IsNaN(n) || math.IsInf(n, 0) {
 		return nil
 	}
-	return n
+	return &n
 }
-func intField(text *otlpInt) any {
+func intField(text *otlpInt) *int64 {
 	if text == nil {
 		return nil
 	}
@@ -251,10 +252,10 @@ func intField(text *otlpInt) any {
 	if err != nil {
 		return nil
 	}
-	return n
+	return &n
 }
 func bucketJSON(values []otlpInt) string {
-	out := make([]any, len(values))
+	out := make([]*int64, len(values))
 	for i := range values {
 		out[i] = intField(&values[i])
 	}
@@ -266,13 +267,13 @@ func expBucketsJSON(b otlpExpBuckets) string {
 func extractDataPoints(m otlpMetric) []metricPoint {
 	var points []metricPoint
 	addNumber := func(kind string, dp otlpDataPoint, temporality int, monotonic bool) {
-		var value any
+		var value *float64
 		if dp.AsDouble != nil {
 			value = finiteDouble(dp.AsDouble)
 		} else if dp.AsInt != nil {
 			n, err := strconv.ParseFloat(string(*dp.AsInt), 64)
 			if err == nil && !math.IsNaN(n) && !math.IsInf(n, 0) {
-				value = n
+				value = &n
 			}
 		}
 		points = append(points, metricPoint{metricType: kind, value: value, timestamp: dp.TimeUnixNano.Time(), startTimestamp: dp.StartTimeUnixNano.Time(), temporality: temporality, monotonic: monotonic, attributes: dp.Attributes})
@@ -289,17 +290,17 @@ func extractDataPoints(m otlpMetric) []metricPoint {
 	}
 	if m.Histogram != nil {
 		for _, dp := range m.Histogram.DataPoints {
-			points = append(points, metricPoint{metricType: "histogram", value: finiteDouble(dp.Sum), timestamp: dp.TimeUnixNano.Time(), startTimestamp: dp.StartTimeUnixNano.Time(), temporality: m.Histogram.AggregationTemporality, attributes: dp.Attributes, count: intField(dp.Count), sum: finiteDouble(dp.Sum), min: finiteDouble(dp.Min), max: finiteDouble(dp.Max), explicitBounds: jsonText(dp.ExplicitBounds), bucketCounts: bucketJSON(dp.BucketCounts)})
+			points = append(points, metricPoint{metricType: "histogram", value: finiteDouble(dp.Sum), timestamp: dp.TimeUnixNano.Time(), startTimestamp: dp.StartTimeUnixNano.Time(), temporality: m.Histogram.AggregationTemporality, attributes: dp.Attributes, count: intField(dp.Count), sum: finiteDouble(dp.Sum), min: finiteDouble(dp.Min), max: finiteDouble(dp.Max), explicitBounds: metricJSON(dp.ExplicitBounds), bucketCounts: metricJSON(json.RawMessage(bucketJSON(dp.BucketCounts)))})
 		}
 	}
 	if m.ExponentialHistogram != nil {
 		for _, dp := range m.ExponentialHistogram.DataPoints {
-			points = append(points, metricPoint{metricType: "exponential_histogram", value: finiteDouble(dp.Sum), timestamp: dp.TimeUnixNano.Time(), startTimestamp: dp.StartTimeUnixNano.Time(), temporality: m.ExponentialHistogram.AggregationTemporality, attributes: dp.Attributes, count: intField(dp.Count), sum: finiteDouble(dp.Sum), min: finiteDouble(dp.Min), max: finiteDouble(dp.Max), expScale: dp.Scale, expZeroCount: intField(dp.ZeroCount), expPositive: expBucketsJSON(dp.Positive), expNegative: expBucketsJSON(dp.Negative)})
+			points = append(points, metricPoint{metricType: "exponential_histogram", value: finiteDouble(dp.Sum), timestamp: dp.TimeUnixNano.Time(), startTimestamp: dp.StartTimeUnixNano.Time(), temporality: m.ExponentialHistogram.AggregationTemporality, attributes: dp.Attributes, count: intField(dp.Count), sum: finiteDouble(dp.Sum), min: finiteDouble(dp.Min), max: finiteDouble(dp.Max), expScale: &dp.Scale, expZeroCount: intField(dp.ZeroCount), expPositive: metricJSON(json.RawMessage(expBucketsJSON(dp.Positive))), expNegative: metricJSON(json.RawMessage(expBucketsJSON(dp.Negative)))})
 		}
 	}
 	if m.Summary != nil {
 		for _, dp := range m.Summary.DataPoints {
-			points = append(points, metricPoint{metricType: "summary", value: finiteDouble(dp.Sum), timestamp: dp.TimeUnixNano.Time(), startTimestamp: dp.StartTimeUnixNano.Time(), attributes: dp.Attributes, count: intField(dp.Count), sum: finiteDouble(dp.Sum), quantiles: jsonText(dp.QuantileValues)})
+			points = append(points, metricPoint{metricType: "summary", value: finiteDouble(dp.Sum), timestamp: dp.TimeUnixNano.Time(), startTimestamp: dp.StartTimeUnixNano.Time(), attributes: dp.Attributes, count: intField(dp.Count), sum: finiteDouble(dp.Sum), quantiles: metricJSON(dp.QuantileValues)})
 		}
 	}
 	return points
@@ -367,3 +368,5 @@ func (n *otlpInt) UnmarshalJSON(b []byte) error {
 	*n = otlpInt(text)
 	return nil
 }
+
+func metricJSON(value any) *string { text := jsonText(value); return &text }

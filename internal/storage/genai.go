@@ -192,11 +192,13 @@ func QueryGenAICalls(db *sql.DB, opts GenAIOptions) ([]GenAICall, error) {
 	if err != nil {
 		return nil, err
 	}
-	if opts.Content {
+	if opts.Content && len(calls) > 0 {
+		events, err := queryContentEvents(db, calls)
+		if err != nil {
+			return nil, err
+		}
 		for i := range calls {
-			if err := populateContent(db, &calls[i], contents[i]); err != nil {
-				return nil, err
-			}
+			populateContent(&calls[i], contents[i], events[spanIdentity{calls[i].TraceID, calls[i].SpanID}])
 		}
 	}
 	return calls, nil
@@ -215,11 +217,7 @@ func decodeContent(value any) any {
 	return value
 }
 
-func populateContent(db *sql.DB, call *GenAICall, attrs map[string]any) error {
-	logs, err := QueryLogs(db, QueryOptions{TraceID: call.TraceID, EventName: "gen_ai.client.inference.operation.details"})
-	if err != nil {
-		return err
-	}
+func populateContent(call *GenAICall, attrs map[string]any, logs []LogResult) {
 	targets := []struct {
 		key  string
 		dest *any
@@ -235,9 +233,6 @@ func populateContent(db *sql.DB, call *GenAICall, attrs map[string]any) error {
 			continue
 		}
 		for _, log := range logs {
-			if log.SpanID != call.SpanID {
-				continue
-			}
 			value, ok := log.Attributes[target.key]
 			if !ok {
 				if body, isMap := log.BodyValue.(map[string]any); isMap {
@@ -253,7 +248,6 @@ func populateContent(db *sql.DB, call *GenAICall, attrs map[string]any) error {
 			}
 		}
 	}
-	return nil
 }
 
 type DurationStats struct {
@@ -377,4 +371,50 @@ func QueryGenAIUsage(db *sql.DB, opts GenAIOptions) ([]GenAIUsageRow, error) {
 		return false
 	})
 	return results, nil
+}
+
+type spanIdentity struct{ traceID, spanID string }
+
+func queryContentEvents(db *sql.DB, calls []GenAICall) (map[spanIdentity][]LogResult, error) {
+	events := make(map[spanIdentity][]LogResult, len(calls))
+	traces := map[string]bool{}
+	var args []any
+	var placeholders []string
+	for _, call := range calls {
+		events[spanIdentity{call.TraceID, call.SpanID}] = nil
+		if !traces[call.TraceID] {
+			traces[call.TraceID] = true
+			placeholders = append(placeholders, "?")
+			args = append(args, call.TraceID)
+		}
+	}
+	query := `SELECT trace_id,span_id,CAST(attributes AS VARCHAR),CAST(body_json AS VARCHAR) FROM logs WHERE event_name='gen_ai.client.inference.operation.details' AND trace_id IN (` + strings.Join(placeholders, ",") + ") ORDER BY timestamp"
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var log LogResult
+		var attrs, body sql.NullString
+		if err := rows.Scan(&log.TraceID, &log.SpanID, &attrs, &body); err != nil {
+			return nil, err
+		}
+		identity := spanIdentity{log.TraceID, log.SpanID}
+		if _, selected := events[identity]; !selected {
+			continue
+		}
+		if attrs.Valid {
+			if err := decodeJSON([]byte(attrs.String), &log.Attributes); err != nil {
+				return nil, err
+			}
+		}
+		if body.Valid {
+			if err := decodeJSON([]byte(body.String), &log.BodyValue); err != nil {
+				return nil, err
+			}
+		}
+		events[identity] = append(events[identity], log)
+	}
+	return events, rows.Err()
 }
