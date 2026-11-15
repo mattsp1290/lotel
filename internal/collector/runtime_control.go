@@ -112,6 +112,12 @@ func stopRuntime(ctx context.Context, state *State) error {
 	} else if err := waitRuntimeStopped(ctx, state); err != nil {
 		return err
 	}
+	if state.Backend == "docker" && result.Error != "" {
+		running, inspectErr := inspectDockerRunning(ctx)
+		if inspectErr != nil || running {
+			return errors.Join(fmt.Errorf("Collector shutdown failed; state retained: %s", result.Error), inspectErr)
+		}
+	}
 	if err := removeState(); err != nil {
 		return err
 	}

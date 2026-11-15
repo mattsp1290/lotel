@@ -21,7 +21,7 @@ func generatedDockerConfig(t *testing.T, source string, existing bool) string {
 	t.Setenv("PATH", bin)
 	argsPath := filepath.Join(home, "args")
 	t.Setenv("LOTEL_TEST_DOCKER_ARGS", argsPath)
-	script := "#!/bin/sh\ncase \"$1\" in\ninspect) exit 1;;\nrun) printf '%s\\n' \"$@\" > \"$LOTEL_TEST_DOCKER_ARGS\"; printf container;;\n*) exit 1;;\nesac\n"
+	script := "#!/bin/sh\ncase \"$1\" in\ninspect) exit 1;;\nps) exit 0;;\nrun) printf '%s\\n' \"$@\" > \"$LOTEL_TEST_DOCKER_ARGS\"; printf container;;\n*) exit 1;;\nesac\n"
 	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func generatedDockerConfig(t *testing.T, source string, existing bool) string {
 	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := startDocker(t.Context(), path, filepath.Join(home, "data")); err != nil {
+	if _, err := startDocker(t.Context(), path, filepath.Join(home, "data")); err != nil {
 		t.Fatal(err)
 	}
 	args, err := os.ReadFile(argsPath)

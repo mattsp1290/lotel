@@ -30,9 +30,10 @@ func stateFilePath()(string,error){return "",nil}
 func readState()(*State,error){return nil,nil}
 func writeState(*State)error{return nil}
 func removeState()error{return nil}
-func startDocker(context.Context,string,string)error{return nil}
+func startDocker(context.Context,string,string)(bool,error){return false,nil}
 func stopDocker(context.Context)error{return nil}
 func isContainerRunning()bool{return false}
+func inspectDockerRunning(context.Context)(bool,error){return false,nil}
 func finishUnmanagedDocker(context.Context,*State)error{return nil}
 `
 	if err := os.WriteFile(filepath.Join(dir, "docker_stubs.go"), []byte(stubs), 0o600); err != nil {

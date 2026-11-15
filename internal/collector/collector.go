@@ -136,6 +136,12 @@ func isContainerRunning() bool {
 }
 
 func inspectDockerRunning(ctx context.Context) (bool, error) {
+	running, _, err := inspectDockerState(ctx)
+	return running, err
+}
+
+// inspectDockerState distinguishes absence from stopped and unknown Docker state.
+func inspectDockerState(ctx context.Context) (running, exists bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Running}}", containerName)
@@ -146,44 +152,43 @@ func inspectDockerRunning(ctx context.Context) (bool, error) {
 		list := exec.CommandContext(ctx, "docker", "ps", "--all", "--filter", "name=^/"+containerName+"$", "--format", "{{.ID}}")
 		list.WaitDelay = 100 * time.Millisecond
 		if ids, listErr := list.Output(); listErr == nil && len(strings.Fields(string(ids))) == 0 {
-			return false, nil
+			return false, false, nil
 		}
-		return false, fmt.Errorf("inspect Collector running state: %w", err)
+		return false, false, fmt.Errorf("inspect Collector running state: %w", err)
 	}
 	switch strings.TrimSpace(string(out)) {
 	case "true":
-		return true, nil
+		return true, true, nil
 	case "false":
-		return false, nil
+		return false, true, nil
 	default:
-		return false, errors.New("Docker returned an invalid Collector running state")
+		return false, false, errors.New("Docker returned an invalid Collector running state")
 	}
 }
 
-// containerExists checks if the lotel-collector container exists (any state).
-func containerExists() bool {
-	err := exec.Command("docker", "inspect", containerName).Run()
-	return err == nil
-}
-
-func startDocker(ctx context.Context, configPath, dataPath string) error {
+// startDocker returns whether this attempt launched a new container.
+func startDocker(ctx context.Context, configPath, dataPath string) (bool, error) {
 	absConfig, err := filepath.Abs(configPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	collectorConfig, err := config.ReadCollector(absConfig)
 	if err != nil {
-		return err
+		return false, err
 	}
 	configBytes, err := os.ReadFile(absConfig)
 	if err != nil {
-		return err
+		return false, err
 	}
 	cfgHash := fmt.Sprintf("%x", sha256.Sum256(configBytes))
-	if isContainerRunning() {
+	running, exists, err := inspectDockerState(ctx)
+	if err != nil {
+		return false, err
+	}
+	if running {
 		state, err := readState()
 		if err != nil {
-			return err
+			return false, err
 		}
 		restart, warning := restartDecision(state, defaultImage, absConfig, cfgHash)
 		if !restart {
@@ -191,17 +196,21 @@ func startDocker(ctx context.Context, configPath, dataPath string) error {
 				fmt.Fprintln(os.Stderr, warning)
 			}
 			fmt.Printf("Collector is already running (container %s).\n", containerName)
-			return nil
+			return false, nil
 		}
 		fmt.Println("Collector configuration or launch options changed; restarting.")
 		if err := stopDocker(ctx); err != nil {
-			return err
+			return false, err
 		}
+		exists = false
 	}
 
 	// Clean up stale container if it exists but isn't running.
-	if containerExists() {
-		_ = exec.Command("docker", "rm", "-f", containerName).Run()
+	if exists {
+		// Do not force removal if an external actor has since started it.
+		if err := exec.CommandContext(ctx, "docker", "rm", containerName).Run(); err != nil {
+			return false, fmt.Errorf("removing stopped Collector container: %w", err)
+		}
 	}
 
 	// Also clean up stale state file.
@@ -209,41 +218,41 @@ func startDocker(ctx context.Context, configPath, dataPath string) error {
 
 	dockerBin, err := findDocker()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Ensure data directories exist.
 	for _, sub := range []string{"traces", "metrics", "logs", "profiles"} {
 		if err := os.MkdirAll(filepath.Join(dataPath, sub), 0o755); err != nil {
-			return fmt.Errorf("creating data directory %s: %w", sub, err)
+			return false, fmt.Errorf("creating data directory %s: %w", sub, err)
 		}
 	}
 
 	absData, err := filepath.Abs(dataPath)
 	if err != nil {
-		return fmt.Errorf("resolving data path: %w", err)
+		return false, fmt.Errorf("resolving data path: %w", err)
 	}
 
 	mountConfig := absConfig
 	if !bytes.Equal(configBytes, collectorConfig.YAML) {
 		statePath, err := stateFilePath()
 		if err != nil {
-			return err
+			return false, err
 		}
 		privateDir := filepath.Join(filepath.Dir(statePath), "docker-config")
 		if err := os.MkdirAll(privateDir, 0o700); err != nil {
-			return err
+			return false, err
 		}
 		if err := os.Chmod(privateDir, 0o700); err != nil {
-			return err
+			return false, err
 		}
 		// Docker mounts only this file; the private parent protects it on the host.
 		mountConfig = filepath.Join(privateDir, "collector.yaml")
 		if err := os.WriteFile(mountConfig, collectorConfig.YAML, 0o644); err != nil {
-			return err
+			return false, err
 		}
 		if err := os.Chmod(mountConfig, 0o644); err != nil {
-			return err
+			return false, err
 		}
 	}
 	// Run the container.
@@ -260,7 +269,7 @@ func startDocker(ctx context.Context, configPath, dataPath string) error {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("starting collector container: %w", err)
+		return false, fmt.Errorf("starting collector container: %w", err)
 	}
 
 	containerID := strings.TrimSpace(string(out))
@@ -278,7 +287,7 @@ func startDocker(ctx context.Context, configPath, dataPath string) error {
 	if err := writeState(newState); err != nil {
 		// Remove the container if we can't persist state.
 		_ = exec.Command("docker", "rm", "-f", containerName).Run()
-		return fmt.Errorf("persisting state: %w", err)
+		return false, fmt.Errorf("persisting state: %w", err)
 	}
 
 	fmt.Printf("Collector started (container %s).\n", containerName)
@@ -287,27 +296,29 @@ func startDocker(ctx context.Context, configPath, dataPath string) error {
 	fmt.Printf("Data:   %s\n", absData)
 	fmt.Println("Health: http://localhost:13133/")
 
-	return nil
+	return true, nil
 }
 
 func stopDocker(ctx context.Context) error {
-	if !isContainerRunning() && !containerExists() {
+	running, exists, err := inspectDockerState(ctx)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		fmt.Println("No collector is running.")
 		return nil
 	}
-
 	fmt.Printf("Stopping collector (container %s)...\n", containerName)
-
-	if err := exec.Command("docker", "stop", containerName).Run(); err != nil {
-		// If stop fails, try force remove.
-		_ = exec.Command("docker", "rm", "-f", containerName).Run()
-		return fmt.Errorf("stopping collector container: %w", err)
+	if running {
+		if err := exec.CommandContext(ctx, "docker", "stop", containerName).Run(); err != nil {
+			// An explicit stop still attempts the existing force-removal fallback.
+			removeErr := exec.CommandContext(ctx, "docker", "rm", "-f", containerName).Run()
+			return fmt.Errorf("stopping collector container: %w", errors.Join(err, removeErr))
+		}
 	}
-
-	if err := exec.Command("docker", "rm", containerName).Run(); err != nil {
+	if err := exec.CommandContext(ctx, "docker", "rm", containerName).Run(); err != nil {
 		return fmt.Errorf("removing collector container: %w", err)
 	}
-
 	fmt.Println("Collector stopped.")
 	return nil
 }

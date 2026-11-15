@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -39,7 +40,15 @@ func Stop(ctx context.Context) error {
 	if state != nil && state.ControlSocket != "" {
 		return stopRuntime(ctx, state)
 	}
-	return errors.Join(stopDocker(ctx), removeState())
+	if state == nil {
+		if _, err := exec.LookPath("docker"); errors.Is(err, exec.ErrNotFound) {
+			return nil
+		}
+	}
+	if err := stopDocker(ctx); err != nil {
+		return err
+	}
+	return removeState()
 }
 
 func lockLifecycle() (func(), error) {

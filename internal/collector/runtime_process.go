@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func startRuntime(ctx context.Context, configPath, dataPath, backend string) error {
+func startRuntime(ctx context.Context, configPath, dataPath, backend string) (resultErr error) {
 	configPath, err := filepath.Abs(configPath)
 	if err != nil {
 		return err
@@ -72,10 +72,21 @@ func startRuntime(ctx context.Context, configPath, dataPath, backend string) err
 		}
 	}
 	createdDocker := false
+	succeeded := false
+	defer func() {
+		if !succeeded && createdDocker {
+			cleanupErr := stopDocker(context.Background())
+			if cleanupErr == nil {
+				cleanupErr = removeState()
+			}
+			if cleanupErr != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("rolling back newly started Docker Collector; state retained: %w", cleanupErr))
+			}
+		}
+	}()
 	if backend == "docker" {
-		before := state
-		wasRunning := isContainerRunning()
-		if err := startDocker(ctx, configPath, dataPath); err != nil {
+		createdDocker, err = startDocker(ctx, configPath, dataPath)
+		if err != nil {
 			return err
 		}
 		state, err = readState()
@@ -85,11 +96,18 @@ func startRuntime(ctx context.Context, configPath, dataPath, backend string) err
 		if state == nil {
 			return errors.New("Docker collector has no recorded config; restart it with lotel")
 		}
-		createdDocker = !wasRunning || before == nil || before.ContainerID != state.ContainerID
 		configPath, dataPath = state.ConfigPath, state.DataPath
 	} else {
-		if isContainerRunning() {
-			return errors.New("Docker collector is running; run 'lotel stop' before switching backend")
+		_, dockerErr := exec.LookPath("docker")
+		recordedDocker := state != nil && state.Backend != "native"
+		if dockerErr == nil || recordedDocker {
+			running, err := inspectDockerRunning(ctx)
+			if err != nil && recordedDocker {
+				return err
+			}
+			if running {
+				return errors.New("Docker collector is running; run 'lotel stop' before switching backend")
+			}
 		}
 		source, err := os.ReadFile(configPath)
 		if err != nil {
@@ -97,13 +115,6 @@ func startRuntime(ctx context.Context, configPath, dataPath, backend string) err
 		}
 		state = &State{StartedAt: time.Now(), ConfigPath: configPath, ConfigSHA256: fmt.Sprintf("%x", sha256.Sum256(source)), DataPath: dataPath, ProfilesEnabled: true}
 	}
-	succeeded := false
-	defer func() {
-		if !succeeded && createdDocker {
-			_ = stopDocker(context.Background())
-			_ = removeState()
-		}
-	}()
 	for _, signal := range []string{"traces", "metrics", "logs", "profiles"} {
 		if err := os.MkdirAll(filepath.Join(dataPath, signal), 0o755); err != nil {
 			return err
