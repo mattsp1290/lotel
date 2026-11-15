@@ -302,7 +302,7 @@ func main() {
 	for _, cmd := range []*cobra.Command{queryTracesCmd, queryMetricsCmd, queryLogsCmd} {
 		cmd.Flags().StringArray("attr", nil, "attribute key=value; repeat for AND; matches compact JSON string form, null never matches")
 	}
-	queryCmd.AddCommand(discoveryCommand("services"), discoveryCommand("operations"), traceCommand(), queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
+	queryCmd.AddCommand(discoveryCommand("services"), discoveryCommand("operations"), spanStatsCommand(), traceCommand(), queryTracesCmd, queryMetricsCmd, queryLogsCmd, queryAggCmd, genAICommand(), otlpQueryCommand(""), otlpQueryCommand("profiles"))
 
 	// --- prune ---
 	var olderThan string
