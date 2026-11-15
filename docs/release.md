@@ -14,8 +14,9 @@ The first published release is required before the public install URL works.
 
 Linux binaries use bundled DuckDB archives but still link system C/C++
 libraries. They are not static musl binaries. Alpine and Windows are not
-supported release targets. Docker must be installed and running to collect
-telemetry. Installation and release checks do not require Docker.
+supported release targets. Docker must be installed and running for the default
+backend. Native collection does not require Docker. Installation and release
+checks do not require Docker.
 
 The release workflow builds each target natively with CGO enabled. It executes
 `--version` and a DuckDB query with an isolated home on each target. Local
