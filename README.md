@@ -206,6 +206,7 @@ lotel --version
 | `lotel assert signal` | Fail if a service has no indexed signal in a time window |
 | `lotel query traces` | Query traces (JSON output) |
 | `lotel query span-stats` | Summarize observed spans by service, name, and kind |
+| `lotel query recent traces` / `lotel query recent logs` | Return a bounded newest-first snapshot |
 | `lotel query log-stats` | Summarize observed logs by service and severity |
 | `lotel query services` | List observed services and their signals |
 | `lotel query operations` | List observed span names and kinds |
@@ -245,6 +246,17 @@ export and ingestion, and use `lotel status` and `lotel health` for collection
 status. Historical assertions do not require a running Collector.
 
 ## Query options
+
+`lotel query recent traces --since 15m --limit 100` and `lotel query recent logs
+--since 15m --limit 100` return `signal`, resolved `since` and `until`,
+`records`, and `truncated`. Both require a bounded start and a limit from 1 to
+1000. They support the corresponding trace or log filters. Results order newest
+first, with deterministic ordering for equal timestamps. Identical records
+remain separate. Time bounds apply to projected microsecond timestamps.
+
+Each result describes one database query. Ingestion, pruning, or rebuilding can
+change a later result. This command does not provide a continuation cursor.
+The limit bounds returned records, not the work needed to search the database.
 
 All query commands except `query trace` support `--service`, `--since`, and `--until`. Generic queries and `genai calls` also accept `--limit`:
 

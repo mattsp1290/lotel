@@ -165,6 +165,10 @@ type MetricAggregation struct {
 
 // QueryTraces returns traces matching the given options.
 func QueryTraces(db queryer, opts TraceQueryOptions) ([]TraceResult, error) {
+	return queryTraces(db, opts, false)
+}
+
+func queryTraces(db queryer, opts TraceQueryOptions, recent bool) ([]TraceResult, error) {
 	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
@@ -183,7 +187,11 @@ func QueryTraces(db queryer, opts TraceQueryOptions) ([]TraceResult, error) {
 		args = append(args, int64(*opts.MinDuration))
 	}
 
-	query += " ORDER BY start_time ASC"
+	if recent {
+		query += " ORDER BY start_time DESC, to_json(traces) ASC"
+	} else {
+		query += " ORDER BY start_time ASC"
+	}
 	if opts.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
 	}
@@ -276,6 +284,10 @@ func QueryMetrics(db *sql.DB, opts QueryOptions) ([]MetricResult, error) {
 
 // QueryLogs returns logs matching the given options.
 func QueryLogs(db queryer, opts LogQueryOptions) ([]LogResult, error) {
+	return queryLogs(db, opts, false)
+}
+
+func queryLogs(db queryer, opts LogQueryOptions, recent bool) ([]LogResult, error) {
 	if err := validateQueryOptions(opts.QueryOptions); err != nil {
 		return nil, err
 	}
@@ -287,7 +299,11 @@ func QueryLogs(db queryer, opts LogQueryOptions) ([]LogResult, error) {
 	args = append(args, buildFilters(&query, opts.QueryOptions, "")...)
 	args = append(args, appendLogFilters(&query, opts.MinSeverity, opts.BodyContains)...)
 
-	query += " ORDER BY timestamp ASC"
+	if recent {
+		query += " ORDER BY timestamp DESC, to_json(logs) ASC"
+	} else {
+		query += " ORDER BY timestamp ASC"
+	}
 	if opts.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
 	}
