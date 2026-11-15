@@ -57,6 +57,18 @@ func fileFingerprint(f *os.File, length int) (string, error) {
 }
 
 func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := ingestFileTx(tx, signal, path, rep); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func ingestFileTx(tx *sql.Tx, signal, path string, rep *SignalReport) error {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -69,11 +81,6 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 	if err != nil {
 		return err
 	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	var offset int64
 	var previous string
 	var previousLen int
@@ -167,9 +174,6 @@ func ingestFile(db *sql.DB, signal, path string, rep *SignalReport) error {
 	}
 	_, err = tx.Exec("INSERT INTO ingest_state (path,byte_offset,fingerprint,fingerprint_len,updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(path) DO UPDATE SET byte_offset=excluded.byte_offset,fingerprint=excluded.fingerprint,fingerprint_len=excluded.fingerprint_len,updated_at=excluded.updated_at", path, offset+consumed, fingerprint, length)
 	if err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
 		return err
 	}
 	rep.Bytes = consumed

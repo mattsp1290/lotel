@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -31,20 +34,27 @@ func main() {
 	// --- start ---
 	var waitHealthy bool
 	var collectorConfig string
+	var backend string
 	startCmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start the OTel Collector container",
+		Short: "Start the OTel Collector",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			if backend == "native" {
+				var cancel context.CancelFunc
+				ctx, cancel = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+				defer cancel()
+			}
 			configPath, dataPath, err := config.ResolvePathsWithConfig(collectorConfig)
 			if err != nil {
 				return err
 			}
-			if err := collector.Start(cmd.Context(), configPath, dataPath); err != nil {
+			if err := collector.Start(ctx, configPath, dataPath, backend); err != nil {
 				return err
 			}
 			if waitHealthy {
 				fmt.Print("Waiting for collector to become healthy...")
-				if err := collector.WaitHealthy(cmd.Context(), 30*time.Second); err != nil {
+				if err := collector.WaitHealthy(ctx, 30*time.Second); err != nil {
 					fmt.Println(" FAILED")
 					return fmt.Errorf("collector did not become healthy: %w", err)
 				}
@@ -54,12 +64,13 @@ func main() {
 		},
 	}
 	startCmd.Flags().StringVar(&collectorConfig, "config", "", "use an explicit Collector config path")
+	startCmd.Flags().StringVar(&backend, "backend", "docker", "collector backend: docker or native")
 	startCmd.Flags().BoolVar(&waitHealthy, "wait", false, "wait for collector to become healthy before returning")
 
 	// --- stop ---
 	stopCmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the OTel Collector container",
+		Short: "Stop the OTel Collector",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return collector.Stop(cmd.Context())
 		},
@@ -105,6 +116,7 @@ func main() {
 	}
 
 	// --- ingest ---
+	var fullIngest bool
 	ingestCmd := &cobra.Command{
 		Use:   "ingest",
 		Short: "Ingest JSONL telemetry files into the query database",
@@ -117,7 +129,12 @@ func main() {
 			if err != nil {
 				return err
 			}
-			report, err := storage.IngestAll(db, dataPath)
+			var report *storage.IngestReport
+			if fullIngest {
+				report, err = storage.ReingestAll(db, dataPath)
+			} else {
+				report, err = storage.IngestAll(db, dataPath)
+			}
 			if err != nil {
 				return err
 			}
@@ -125,6 +142,8 @@ func main() {
 			return nil
 		},
 	}
+
+	ingestCmd.Flags().BoolVar(&fullIngest, "full", false, "rebuild the query index from retained JSONL; previously pruned records can return")
 
 	// --- query traces ---
 	queryCmd := &cobra.Command{
@@ -305,6 +324,7 @@ func main() {
 	pruneCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be pruned without deleting")
 	pruneCmd.Flags().BoolVar(&pruneAll, "all", false, "delete all telemetry data")
 
+	rootCmd.AddCommand(nativeRunCommand())
 	rootCmd.AddCommand(startCmd, stopCmd, statusCmd, healthCmd, ingestCmd, queryCmd, pruneCmd, upgradeCommand())
 
 	ctx := context.Background()
@@ -366,7 +386,22 @@ func parseDuration(s string) (time.Duration, error) {
 }
 
 func openDB() (*sql.DB, error) {
-	db, err := storage.DB()
+	dataPath, err := config.DataPath()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dataPath, 0o755); err != nil {
+		return nil, err
+	}
+	var db *sql.DB
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		db, err = storage.OpenDB(filepath.Join(dataPath, "lotel.db"))
+		if err == nil || !storage.IsDatabaseLocked(err) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	if err == nil && storage.SchemaRebuilt {
 		fmt.Fprintln(os.Stderr, "lotel: database index rebuilt; run 'lotel ingest' to reload raw telemetry")
 		storage.SchemaRebuilt = false
