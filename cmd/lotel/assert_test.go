@@ -43,8 +43,8 @@ func TestAssertSignalCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	invoke := func(dir string, args ...string) (string, string, error) {
-		cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestTraceFiltersHelper$", "--", "assert", "signal"}, args...)...)
-		cmd.Env = append(os.Environ(), "HOME="+dir, "LOTEL_FILTERS_HELPER=1")
+		cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestCLIHelper$", "--", "assert", "signal"}, args...)...)
+		cmd.Env = append(os.Environ(), "HOME="+dir, "LOTEL_CLI_HELPER=1")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()
