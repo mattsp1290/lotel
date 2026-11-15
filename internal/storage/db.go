@@ -59,7 +59,7 @@ func dbPath() (string, error) {
 	return filepath.Join(dir, "lotel.db"), nil
 }
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 var SchemaRebuilt bool
 
@@ -86,10 +86,10 @@ func migrate(db *sql.DB) error {
 		}
 	}
 	if version > schemaVersion {
-		return fmt.Errorf("database schema v%d is newer than this lotel (v2); upgrade lotel or delete the database", version)
+		return fmt.Errorf("database schema v%d is newer than this lotel (v3); upgrade lotel or delete the database", version)
 	}
 	rebuilt := false
-	if version < schemaVersion {
+	if version < 2 {
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='traces')`).Scan(&rebuilt); err != nil {
 			return err
 		}
@@ -156,7 +156,7 @@ func migrate(db *sql.DB) error {
 			observed_timestamp TIMESTAMP,
    event_name VARCHAR,
    body_json JSON,
-   flags INTEGER,
+   flags BIGINT,
    resource_attributes JSON,
    scope_name VARCHAR,
    scope_version VARCHAR,
@@ -176,13 +176,25 @@ func migrate(db *sql.DB) error {
    fingerprint_len INTEGER,
    updated_at TIMESTAMP
   )`,
+		`CREATE TABLE IF NOT EXISTS otlp_envelopes (
+            signal VARCHAR NOT NULL,
+            service_name VARCHAR NOT NULL,
+            first_nano UBIGINT,
+            last_nano UBIGINT,
+            payload JSON NOT NULL
+        )`,
 	}
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("migration: %w", err)
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO schema_meta VALUES ('schema_version','2') ON CONFLICT(key) DO UPDATE SET value=excluded.value`); err != nil {
+	if version == 2 {
+		if _, err := tx.Exec(`ALTER TABLE logs ALTER COLUMN flags TYPE BIGINT`); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_meta VALUES ('schema_version','3') ON CONFLICT(key) DO UPDATE SET value=excluded.value`); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

@@ -24,6 +24,8 @@ go build -o lotel ./cmd/lotel
 ./lotel query traces --service my-app
 ./lotel query metrics --service my-app
 ./lotel query logs --service my-app
+./lotel query profiles --service my-app
+./lotel query otlp --signal metrics --service my-app
 ```
 
 ## Commands
@@ -38,6 +40,8 @@ go build -o lotel ./cmd/lotel
 | `lotel query traces` | Query traces (JSON output) |
 | `lotel query metrics` | Query metrics (JSON output) |
 | `lotel query logs` | Query logs (JSON output) |
+| `lotel query profiles` | Query complete OTLP profile resource envelopes |
+| `lotel query otlp --signal <signal>` | Query complete OTLP envelopes for traces, metrics, logs, or profiles |
 | `lotel query genai calls` | Query model, agent, and tool calls |
 | `lotel query genai usage` | Group token usage, errors, and latency |
 | `lotel query aggregate` | Compute avg/min/max for a metric |
@@ -77,6 +81,39 @@ totals, calls with missing usage, errors, and nearest-rank latency percentiles.
 For cumulative histograms, read the latest `query metrics --name <name>` point.
 `query aggregate` aggregates per-point sums without correcting cumulative temporality.
 
+### Complete telemetry data
+
+`query otlp` retains the complete JSON exported by the Collector. Each result
+contains `signal`, `service_name`, and `payload`. The payload contains one
+resource group with its scopes, records, schemas, and original top-level fields.
+Profile dictionaries remain intact so sample references stay valid.
+
+```bash
+lotel query otlp --signal traces --service my-app --since 15m
+lotel query otlp --signal metrics --service my-app --since 15m
+lotel query otlp --signal logs --service my-app --since 15m
+lotel query profiles --service my-app --since 15m
+```
+
+Use these commands for exact nanosecond timestamps, typed attributes, large
+integer metric values, unsigned counts, special floating-point values,
+exemplars, flags, dropped counts, and complete resource and scope metadata.
+The existing traces, metrics, logs, and GenAI queries remain convenience
+projections. Their numeric and timestamp columns can lose precision, and they
+do not expose every OTLP field.
+
+Time filters select resource envelopes whose timestamp ranges overlap the
+requested window. They return the entire envelope, including records outside
+that window. `--limit` counts resource envelopes. Undated envelopes appear in
+unbounded queries and are excluded when a time bound is supplied. Service
+filters match the resource's `service.name`. These commands do not accept the
+record filters such as `--name`, `--trace-id`, or `--attr`.
+
+Retention deletes a complete envelope only when its latest timestamp is older
+than the cutoff. This keeps newer records in mixed-age envelopes. Undated
+envelopes require `prune --all`. A dictionary can contain unused entries from
+other resources because lotel preserves it without rewriting its indices.
+
 ### Examples
 
 ```bash
@@ -113,27 +150,34 @@ This makes lotel suitable for scripted and agent-driven workflows.
 ```
 Application → OTLP (gRPC :4317 / HTTP :4318)
     → OTel Collector (Docker container)
-        → ~/.lotel/data/{traces,metrics,logs}/*.jsonl
+        → ~/.lotel/data/{traces,metrics,logs,profiles}/*.jsonl
             → lotel ingest → DuckDB (~/.lotel/data/lotel.db)
                 → lotel query → JSON output
 ```
 
 ## Data Storage
 
-- **Raw**: JSONL files written by the collector to `~/.lotel/data/{traces,metrics,logs}/`
+- **Raw**: JSONL files written by the collector to `~/.lotel/data/{traces,metrics,logs,profiles}/`
 - **Indexed**: DuckDB database at `~/.lotel/data/lotel.db` (populated by `lotel ingest`)
 - **State**: Container ID and config at `~/.lotel/collector.state`
 - **Config**: Default config at `~/.lotel/collector-config.yaml` (auto-generated)
 
-Schema v2 preserves typed attributes, resource and scope metadata, span events
-and links, structured log bodies, event names, and histogram buckets.
-`ingest_state` tracks a byte offset and file fingerprint per JSONL file. Repeated
-ingest reads only complete new lines. Malformed lines and skipped records appear
-in the ingest report.
+Schema v3 adds complete OTLP resource envelopes alongside the existing query
+projections. `ingest_state` tracks one byte offset and file fingerprint per
+JSONL file. Payloads, projections, and progress commit atomically. Repeated
+ingestion reads only complete new lines.
+Malformed lines and skipped projection records appear in the ingest report.
+`otlp_envelopes` counts preserved resource envelopes separately from projected
+records. A skipped projection does not imply that its OTLP payload was lost.
+`projection_skipped_lines` counts envelopes that the convenience decoder could
+not interpret. Prune reports use `otlp_envelopes_deleted` for complete envelopes.
 
-On upgrade from an older database schema, lotel rebuilds the index. Run
-`lotel ingest` to reload raw history. Previously pruned rows reappear after a
-rebuild because prune leaves the raw JSONL files intact.
+The v2 upgrade preserves indexed rows and existing ingestion progress. Complete
+OTLP retention starts at that progress point, so previously ingested history
+remains available through the existing queries. It does not gain complete
+OTLP payloads retroactively. Databases older than v2 still rebuild their index.
+Run `lotel ingest` to reload that raw history. Pruned rows can reappear after
+a rebuild because prune leaves the raw JSONL files intact.
 
 ## Configuration
 
@@ -143,9 +187,14 @@ lotel looks for collector config in this order:
 
 The collector image is pinned to `otel/opentelemetry-collector-contrib:0.165.0`.
 The default config provides OTLP receivers, GenAI normalization, spanmetrics,
-batch processing, and file exporters for all three signals.
+batch processing, and file exporters for traces, metrics, logs, and profiles.
+Profiles bypass the trace-only GenAI normalizer and use the Collector's
+`service.profilesSupport` feature gate. Profile protocol support is experimental
+and senders must match the schema in the pinned Collector release.
+The pinned release accepts HTTP profiles at `/v1development/profiles` on port
+4318. The other signals use `/v1/traces`, `/v1/metrics`, and `/v1/logs`.
 
-The managed file starts with `# lotel-managed-config v2`. Lotel replaces older
+The managed file starts with `# lotel-managed-config v3`. Lotel replaces older
 managed versions. It backs up a file without a managed header to
 `collector-config.yaml.bak.<timestamp>` before replacing it. Put custom config
 in `./lotel-collector.yaml`; lotel leaves that file untouched.
@@ -228,8 +277,15 @@ go vet ./...
 go build -o lotel ./cmd/lotel
 pip install requests
 LOTEL_BIN=./lotel python3 scripts/verify.py
+./lotel start --wait
+LOTEL_BIN=./lotel python3 scripts/verify_otlp.py
 LOTEL_DOCKER_TESTS=1 go test ./internal/config -run 'TestExampleConfigsValidate|TestRedactionRecipesBehavior' -v
 ```
+
+`verify_otlp.py` sends all four signals, compares queried envelopes with the
+Collector's actual JSONL, and checks exact numbers, exemplars, all five metric
+types, profile queries, and repeated-ingest idempotency. It leaves the Collector
+running and retains its uniquely tagged verification data.
 
 ### Optional live LLM test
 

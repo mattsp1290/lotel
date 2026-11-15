@@ -12,7 +12,8 @@ func TestRestartDecision(t *testing.T) {
 		{"image", &State{Image: "old"}, true, false},
 		{"path", &State{Image: "image", ConfigPath: "other"}, false, true},
 		{"hash", &State{Image: "image", ConfigPath: "config", ConfigSHA256: "old"}, true, false},
-		{"current", &State{Image: "image", ConfigPath: "config", ConfigSHA256: "hash"}, false, false},
+		{"profiles upgrade", &State{Image: "image", ConfigPath: "config", ConfigSHA256: "hash"}, true, false},
+		{"current", &State{Image: "image", ConfigPath: "config", ConfigSHA256: "hash", ProfilesEnabled: true}, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			restart, warning := restartDecision(tc.state, "image", "config", "hash")
