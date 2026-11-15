@@ -104,7 +104,7 @@ func DiagnoseRuntime(ctx context.Context) RuntimeDiagnosis {
 		report.Runtime.Reason = "state_invalid"
 		return report
 	}
-	response, err := runtimeControlRequest(ctx, &state, http.MethodGet, "/status", 2*time.Second, func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse })
+	response, err := runtimeControlRequest(ctx, &state, http.MethodGet, "/status", runtimeStatusTimeout, func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse })
 	if err != nil {
 		report.Runtime = DiagnosisRuntime{Observation: "unavailable", Reason: "runtime_unavailable"}
 		return report

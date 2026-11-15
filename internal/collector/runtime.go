@@ -75,7 +75,7 @@ func Run(ctx context.Context, options RuntimeOptions) error {
 				return
 			}
 			status.Running = running
-			status.Healthy = status.Running && checkHealth()
+			status.Healthy = status.Running && checkHealthContext(r.Context())
 		}
 		status.Healthy = status.Healthy && (!status.Ingestion.Enabled || status.Ingestion.Running && status.Ingestion.LastSuccess != nil && status.Ingestion.LastError == "")
 		w.Header().Set("Content-Type", "application/json")

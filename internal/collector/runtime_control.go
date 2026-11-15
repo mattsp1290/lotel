@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+const (
+	dockerInspectionTimeout = 3 * time.Second
+	collectorHealthTimeout  = 2 * time.Second
+	runtimeStatusTimeout    = 2*dockerInspectionTimeout + collectorHealthTimeout + time.Second
+)
+
 var errRuntimeUnavailable = errors.New("collector runtime control is unavailable")
 
 func runtimeControlRequest(ctx context.Context, state *State, method, path string, timeout time.Duration, checkRedirect func(*http.Request, []*http.Request) error) (*http.Response, error) {
@@ -46,7 +52,7 @@ func runtimeControlRequest(ctx context.Context, state *State, method, path strin
 }
 
 func requestRuntimeStatus(ctx context.Context, state *State) (*Status, error) {
-	response, err := runtimeControlRequest(ctx, state, http.MethodGet, "/status", 2*time.Second, nil)
+	response, err := runtimeControlRequest(ctx, state, http.MethodGet, "/status", runtimeStatusTimeout, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +82,10 @@ func runtimeStatus(ctx context.Context, state *State) (*Status, error) {
 		status.Ingestion.Enabled = true
 		status.Ingestion.LastError = "collector runtime is unavailable"
 		if state.Backend == "docker" {
-			status.Running = isContainerRunning()
+			status.Running, _ = inspectDockerRunning(ctx)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			status.ContainerID = state.ContainerID
 			status.ContainerName = state.ContainerName
 		}
